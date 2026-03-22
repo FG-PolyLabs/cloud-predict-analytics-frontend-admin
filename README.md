@@ -25,7 +25,7 @@ Browser (Admin)
   │
   ├── Read (static JSON data)
   │     └── GitHub Raw (FG-PolyLabs/cloud-predict-analytics-data)
-  │           └── GCS fallback (gs://weather-data, project: fg-polylabs)
+  │           └── GCS fallback (gs://fg-polylabs-weather-data, project: fg-polylabs)
   │
   └── Write (create, update, delete)
         └── Cloud Run API (weather-api, us-central1, project: fg-polylabs)
