@@ -50,7 +50,7 @@ bash scripts/setup.sh
 | Cloud Run API | `weather-api` — `us-central1` |
 | Cloud Run Job | `weather-polymarket` — `us-central1`, runs daily |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
-| GCS Bucket | `fg-polylabs-data` in `fg-polylabs` (managed by `cloud-predict-analytics-data` repo) |
+| GCS Bucket | `weather` in `fg-polylabs` (managed by `cloud-predict-analytics-data` repo) |
 | Firebase Project | `collection-showcase-auth` |
 
 ### Key Files

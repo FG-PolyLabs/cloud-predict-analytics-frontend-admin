@@ -99,7 +99,7 @@ All configuration is supplied via `HUGO_PARAMS_*` environment variables. See `.e
 | `HUGO_PARAMS_FIREBASE_STORAGE_BUCKET` | `collection-showcase-auth.firebasestorage.app` |
 | `HUGO_PARAMS_BACKENDURL` | Cloud Run `weather-api` URL |
 | `HUGO_PARAMS_ALLOWED_EMAILS` | Comma-separated admin emails |
-| `HUGO_PARAMS_GCS_DATA_BUCKET` | `fg-polylabs-data` |
+| `HUGO_PARAMS_GCS_DATA_BUCKET` | `weather` |
 | `HUGO_PARAMS_GITHUB_DATA_REPO` | `FG-PolyLabs/cloud-predict-analytics-data` |
 
 ### GitHub Actions Secrets (sensitive)
