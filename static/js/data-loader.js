@@ -1,4 +1,32 @@
-// Fetches a JSON file: tries GitHub raw first, falls back to GCS.
+// Parses text content as JSON or JSONL based on filename extension.
+function parseResponse(filename, text) {
+  if (filename.endsWith('.jsonl')) {
+    return text.trim().split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  }
+  return JSON.parse(text);
+}
+
+// Fetches a JSON/JSONL file directly from GitHub raw (no fallback).
+async function loadFromGitHub(filename) {
+  const { githubDataRepo } = window.DATA_CONFIG || {};
+  if (!githubDataRepo) throw new Error('DATA_CONFIG.githubDataRepo is not set');
+  const url = `https://raw.githubusercontent.com/${githubDataRepo}/main/${filename}?t=${Date.now()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GitHub fetch failed for ${filename}: HTTP ${res.status}`);
+  return parseResponse(filename, await res.text());
+}
+
+// Fetches a JSON/JSONL file directly from GCS (no fallback).
+async function loadFromGCS(filename) {
+  const { gcsBucket } = window.DATA_CONFIG || {};
+  if (!gcsBucket) throw new Error('DATA_CONFIG.gcsBucket is not set');
+  const url = `https://storage.googleapis.com/${gcsBucket}/${filename}?t=${Date.now()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GCS fetch failed for ${filename}: HTTP ${res.status}`);
+  return parseResponse(filename, await res.text());
+}
+
+// Fetches a JSON/JSONL file: tries GitHub raw first, falls back to GCS.
 // Requires window.DATA_CONFIG = { gcsBucket, githubDataRepo }
 async function loadJsonData(filename) {
   const { gcsBucket, githubDataRepo } = window.DATA_CONFIG || {};
@@ -12,7 +40,7 @@ async function loadJsonData(filename) {
     try {
       const res = await fetch(githubUrl);
       console.debug(`[data-loader] GitHub response: ${res.status} for ${filename}`);
-      if (res.ok) return await res.json();
+      if (res.ok) return parseResponse(filename, await res.text());
       console.warn(`[data-loader] GitHub returned ${res.status} for ${filename}, falling back to GCS`);
     } catch (e) {
       console.warn(`[data-loader] GitHub fetch threw for ${filename}:`, e);
@@ -29,7 +57,7 @@ async function loadJsonData(filename) {
     const gcsRes = await fetch(gcsUrl);
     console.debug(`[data-loader] GCS response: ${gcsRes.status} for ${filename}`);
     if (!gcsRes.ok) throw new Error(`GCS fetch failed for ${filename}: ${gcsRes.status}`);
-    return await gcsRes.json();
+    return parseResponse(filename, await gcsRes.text());
   } catch (e) {
     console.error(`[data-loader] GCS fetch threw for ${filename}:`, e);
     throw e;

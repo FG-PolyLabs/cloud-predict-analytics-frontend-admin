@@ -1,6 +1,24 @@
 {{ define "main" }}
-<div class="d-flex align-items-center justify-content-between mb-4">
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <!-- Data source refresh buttons (GitHub/GCS disabled — snapshots are API-only) -->
+    <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
+      <button type="button" class="btn btn-outline-secondary" disabled title="Snapshot data is not available as a static file">
+        <i class="bi bi-github me-1"></i>GitHub
+      </button>
+      <button type="button" class="btn btn-outline-secondary" disabled title="Snapshot data is not available as a static file">
+        <i class="bi bi-cloud me-1"></i>GCS
+      </button>
+      <button type="button" class="btn btn-outline-secondary active" id="btn-src-api" title="Load from backend API">
+        <i class="bi bi-database me-1"></i>API
+      </button>
+    </div>
+    <!-- Sync button -->
+    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Push tracked cities data to GCS">
+      <i class="bi bi-arrow-repeat me-1"></i>Sync to GCS
+    </button>
+  </div>
 </div>
 
 <div id="auth-guard" class="alert alert-warning d-none">
@@ -124,6 +142,23 @@
     } catch (e) {
       loadingEl.classList.add('d-none');
       showToast('Query failed: ' + e.message, 'danger');
+    }
+  }
+
+  async function runSync() {
+    const btn = document.getElementById('btn-sync');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing…';
+    try {
+      const result = await api('POST', '/sync');
+      const msg = `Synced ${result.tracked_cities} cities to GCS (${result.gcs_bucket}) at ${result.synced_at}`;
+      showToast(msg, result.gcs ? 'success' : 'warning');
+      if (result.gcs_error) showToast('GCS error: ' + result.gcs_error, 'danger');
+    } catch (e) {
+      showToast('Sync failed: ' + e.message, 'danger');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync to GCS';
     }
   }
 
