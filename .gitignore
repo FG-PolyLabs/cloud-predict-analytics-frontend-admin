@@ -10,6 +10,9 @@ resources/_gen/
 firebase-config.js
 serviceAccountKey.json
 
+# Claude Code — local-only settings (contains absolute machine paths)
+.claude/settings.local.json
+
 # Editor/IDE
 .idea/
 .vscode/
