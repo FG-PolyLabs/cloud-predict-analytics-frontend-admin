@@ -20,7 +20,7 @@
       </button>
     </div>
     <!-- Sync button -->
-    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Push current BigQuery data to GCS">
+    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Dump cities + snapshots to GCS and GitHub">
       <i class="bi bi-arrow-repeat me-1"></i>Sync to GCS
     </button>
     <!-- Add city button -->
@@ -213,9 +213,17 @@
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing…';
     try {
       const result = await api('POST', '/sync');
-      const msg = `Synced ${result.tracked_cities} cities to GCS (${result.gcs_bucket}) at ${result.synced_at}`;
-      showToast(msg, result.gcs ? 'success' : 'warning');
-      if (result.gcs_error) showToast('GCS error: ' + result.gcs_error, 'danger');
+      const tc = result.tracked_cities;
+      const sn = result.snapshots;
+      const parts = [
+        `Cities: ${tc.count} rows → GCS ${tc.gcs ? '✓' : '✗'}`,
+        `Snapshots: ${sn.count} rows → GCS ${sn.gcs ? '✓' : '✗'}`,
+        `GitHub: ${result.github ? '✓' : (result.github_skipped ? 'skipped (no token)' : '✗')}`,
+      ];
+      showToast(parts.join(' | '), tc.gcs && sn.gcs ? 'success' : 'warning');
+      if (tc.error)  showToast('Cities error: '    + tc.error,  'danger');
+      if (sn.error)  showToast('Snapshots error: ' + sn.error,  'danger');
+      if (result.github_errors) result.github_errors.forEach(e => showToast('GitHub: ' + e, 'danger'));
     } catch (e) {
       showToast('Sync failed: ' + e.message, 'danger');
     } finally {

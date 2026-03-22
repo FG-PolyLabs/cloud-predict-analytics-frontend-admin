@@ -2,20 +2,18 @@
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
   <div class="d-flex align-items-center gap-2 flex-wrap">
-    <!-- Data source refresh buttons (GitHub/GCS disabled — snapshots are API-only) -->
     <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
-      <button type="button" class="btn btn-outline-secondary" disabled title="Snapshot data is not available as a static file">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
         <i class="bi bi-github me-1"></i>GitHub
       </button>
-      <button type="button" class="btn btn-outline-secondary" disabled title="Snapshot data is not available as a static file">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-gcs" onclick="setSource('gcs')" title="Load from GCS bucket">
         <i class="bi bi-cloud me-1"></i>GCS
       </button>
-      <button type="button" class="btn btn-outline-secondary active" id="btn-src-api" title="Load from backend API">
+      <button type="button" class="btn btn-outline-secondary active" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
         <i class="bi bi-database me-1"></i>API
       </button>
     </div>
-    <!-- Sync button -->
-    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Push tracked cities data to GCS">
+    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Dump snapshot data to GCS and GitHub">
       <i class="bi bi-arrow-repeat me-1"></i>Sync to GCS
     </button>
   </div>
@@ -52,6 +50,9 @@
         <button class="btn btn-primary btn-sm" onclick="loadSnapshots()">
           <i class="bi bi-search me-1"></i>Query
         </button>
+      </div>
+      <div class="col-sm-auto">
+        <span id="source-badge" class="badge bg-secondary d-none"></span>
       </div>
     </div>
   </div>
@@ -93,6 +94,9 @@
 
 {{ define "page-scripts" }}
 <script>
+  let currentSource = 'api';
+  let staticSnapshots = null; // cached data for GitHub/GCS sources
+
   firebase.auth().onAuthStateChanged(async user => {
     if (!user) {
       document.getElementById('filters-card').classList.add('d-none');
@@ -113,25 +117,56 @@
         sel.appendChild(opt);
       });
     } catch (e) {
-      // non-fatal — user can still type a city or leave blank
+      // non-fatal
+    }
+  }
+
+  function setSource(source) {
+    currentSource = source;
+    staticSnapshots = null; // clear cache when switching source
+    ['github', 'gcs', 'api'].forEach(s => {
+      document.getElementById(`btn-src-${s}`).classList.toggle('active', s === source);
+    });
+    const badge = document.getElementById('source-badge');
+    if (source !== 'api') {
+      badge.textContent = `data from ${source} (last sync)`;
+      badge.classList.remove('d-none');
+    } else {
+      badge.classList.add('d-none');
     }
   }
 
   async function loadSnapshots() {
     const city  = document.getElementById('filter-city').value;
     const date  = document.getElementById('filter-date').value;
-    const limit = document.getElementById('filter-limit').value;
+    const limit = parseInt(document.getElementById('filter-limit').value) || 200;
 
-    const loadingEl  = document.getElementById('loading');
-    const emptyEl    = document.getElementById('empty-state');
-    const cardEl     = document.getElementById('snapshots-card');
+    const loadingEl = document.getElementById('loading');
+    const emptyEl   = document.getElementById('empty-state');
+    const cardEl    = document.getElementById('snapshots-card');
 
     loadingEl.classList.remove('d-none');
     emptyEl.classList.add('d-none');
     cardEl.classList.add('d-none');
 
     try {
-      const rows = await api('GET', '/snapshots' + qs({ city, date, limit }));
+      let rows;
+
+      if (currentSource === 'github' || currentSource === 'gcs') {
+        // Load the full static dump once, then filter client-side.
+        if (!staticSnapshots) {
+          staticSnapshots = currentSource === 'github'
+            ? await loadFromGitHub('data/snapshots.jsonl')
+            : await loadFromGCS('data/snapshots.jsonl');
+        }
+        rows = staticSnapshots;
+        if (city)  rows = rows.filter(r => r.city === city);
+        if (date)  rows = rows.filter(r => r.date === date);
+        rows = rows.slice(0, limit);
+      } else {
+        rows = await api('GET', '/snapshots' + qs({ city, date, limit }));
+      }
+
       loadingEl.classList.add('d-none');
       if (!rows || rows.length === 0) {
         emptyEl.classList.remove('d-none');
@@ -141,7 +176,7 @@
       cardEl.classList.remove('d-none');
     } catch (e) {
       loadingEl.classList.add('d-none');
-      showToast('Query failed: ' + e.message, 'danger');
+      showToast('Query failed (' + currentSource + '): ' + e.message, 'danger');
     }
   }
 
@@ -151,9 +186,18 @@
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing…';
     try {
       const result = await api('POST', '/sync');
-      const msg = `Synced ${result.tracked_cities} cities to GCS (${result.gcs_bucket}) at ${result.synced_at}`;
-      showToast(msg, result.gcs ? 'success' : 'warning');
-      if (result.gcs_error) showToast('GCS error: ' + result.gcs_error, 'danger');
+      const tc = result.tracked_cities;
+      const sn = result.snapshots;
+      const parts = [
+        `Cities: ${tc.count} rows → GCS ${tc.gcs ? '✓' : '✗'}`,
+        `Snapshots: ${sn.count} rows → GCS ${sn.gcs ? '✓' : '✗'}`,
+        `GitHub: ${result.github ? '✓' : (result.github_skipped ? 'skipped (no token)' : '✗')}`,
+      ];
+      showToast(parts.join(' | '), tc.gcs && sn.gcs ? 'success' : 'warning');
+      if (tc.error)  showToast('Cities error: '    + tc.error,  'danger');
+      if (sn.error)  showToast('Snapshots error: ' + sn.error,  'danger');
+      if (result.github_errors) result.github_errors.forEach(e => showToast('GitHub: ' + e, 'danger'));
+      staticSnapshots = null; // invalidate cache after sync
     } catch (e) {
       showToast('Sync failed: ' + e.message, 'danger');
     } finally {
