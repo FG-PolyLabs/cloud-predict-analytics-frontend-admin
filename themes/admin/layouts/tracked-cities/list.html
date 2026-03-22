@@ -1,6 +1,11 @@
 {{ define "main" }}
 <div class="d-flex align-items-center justify-content-between mb-4">
-  <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+  <div class="d-flex align-items-center gap-3">
+    <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+    <select class="form-select form-select-sm w-auto" id="source-filter" onchange="onSourceFilterChange()">
+      <option value="">All sources</option>
+    </select>
+  </div>
   <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#cityModal" onclick="openCreateModal()">
     <i class="bi bi-plus-lg me-1"></i>Add City
   </button>
@@ -26,6 +31,7 @@
         <thead class="table-light">
           <tr>
             <th class="ps-3">City</th>
+            <th>Source</th>
             <th>Display Name</th>
             <th>Timezone</th>
             <th>Status</th>
@@ -50,9 +56,14 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="city-key">
+        <input type="hidden" id="city-key-source">
         <div class="mb-3">
-          <label class="form-label small fw-medium" for="city-slug">City slug <span class="text-muted fw-normal">(Polymarket form, e.g. london, new-york)</span></label>
+          <label class="form-label small fw-medium" for="city-slug">City slug <span class="text-muted fw-normal">(e.g. london, new-york)</span></label>
           <input type="text" class="form-control" id="city-slug" placeholder="london">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-medium" for="city-source">Source <span class="text-muted fw-normal">(e.g. polymarket)</span></label>
+          <input type="text" class="form-control" id="city-source" placeholder="polymarket">
         </div>
         <div class="mb-3">
           <label class="form-label small fw-medium" for="city-display">Display name</label>
@@ -103,6 +114,8 @@
   const cityModal   = new bootstrap.Modal(document.getElementById('cityModal'));
   const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
 
+  let allCities = [];
+
   firebase.auth().onAuthStateChanged(async user => {
     if (!user) {
       document.getElementById('loading').classList.add('d-none');
@@ -114,13 +127,32 @@
 
   async function loadCities() {
     try {
-      const cities = await api('GET', '/tracked-cities');
+      const sourceFilter = document.getElementById('source-filter').value;
+      const query = sourceFilter ? `?source=${encodeURIComponent(sourceFilter)}` : '';
+      allCities = await api('GET', '/tracked-cities' + query);
       document.getElementById('loading').classList.add('d-none');
-      if (!cities || cities.length === 0) {
+
+      // Populate source filter options from full (unfiltered) list if not yet populated
+      if (document.getElementById('source-filter').options.length === 1) {
+        const all = await api('GET', '/tracked-cities');
+        const sources = [...new Set(all.map(c => c.source))].sort();
+        const sel = document.getElementById('source-filter');
+        sources.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s;
+          sel.appendChild(opt);
+        });
+        allCities = sourceFilter ? allCities : all;
+      }
+
+      if (!allCities || allCities.length === 0) {
         document.getElementById('empty-state').classList.remove('d-none');
+        document.getElementById('cities-card').classList.add('d-none');
         return;
       }
-      renderCities(cities);
+      document.getElementById('empty-state').classList.add('d-none');
+      renderCities(allCities);
       document.getElementById('cities-card').classList.remove('d-none');
     } catch (e) {
       document.getElementById('loading').classList.add('d-none');
@@ -128,10 +160,18 @@
     }
   }
 
+  async function onSourceFilterChange() {
+    document.getElementById('loading').classList.remove('d-none');
+    document.getElementById('cities-card').classList.add('d-none');
+    document.getElementById('empty-state').classList.add('d-none');
+    await loadCities();
+  }
+
   function renderCities(cities) {
     document.getElementById('cities-tbody').innerHTML = cities.map(c => `
       <tr>
         <td class="ps-3 fw-medium font-monospace">${escHtml(c.city)}</td>
+        <td class="text-muted small font-monospace">${escHtml(c.source)}</td>
         <td>${escHtml(c.display_name)}</td>
         <td class="text-muted small">${escHtml(c.timezone)}</td>
         <td>
@@ -145,7 +185,7 @@
           <button class="btn btn-sm btn-outline-secondary me-1" onclick='openEditModal(${JSON.stringify(c)})'>
             <i class="bi bi-pencil"></i>
           </button>
-          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal('${escHtml(c.city)}')">
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal('${escHtml(c.city)}', '${escHtml(c.source)}')">
             <i class="bi bi-trash3"></i>
           </button>
         </td>
@@ -156,8 +196,11 @@
   function openCreateModal() {
     document.getElementById('modal-title').textContent = 'Add City';
     document.getElementById('city-key').value = '';
+    document.getElementById('city-key-source').value = '';
     document.getElementById('city-slug').value = '';
     document.getElementById('city-slug').disabled = false;
+    document.getElementById('city-source').value = '';
+    document.getElementById('city-source').disabled = false;
     document.getElementById('city-display').value = '';
     document.getElementById('city-tz').value = '';
     document.getElementById('city-active').checked = true;
@@ -168,8 +211,11 @@
   function openEditModal(c) {
     document.getElementById('modal-title').textContent = 'Edit City';
     document.getElementById('city-key').value = c.city;
+    document.getElementById('city-key-source').value = c.source;
     document.getElementById('city-slug').value = c.city;
-    document.getElementById('city-slug').disabled = true; // slug is the primary key, can't change it
+    document.getElementById('city-slug').disabled = true;
+    document.getElementById('city-source').value = c.source;
+    document.getElementById('city-source').disabled = true;
     document.getElementById('city-display').value = c.display_name;
     document.getElementById('city-tz').value = c.timezone;
     document.getElementById('city-active').checked = c.active;
@@ -180,7 +226,9 @@
 
   async function saveCity() {
     const key     = document.getElementById('city-key').value;
+    const keySrc  = document.getElementById('city-key-source').value;
     const slug    = document.getElementById('city-slug').value.trim().toLowerCase();
+    const source  = document.getElementById('city-source').value.trim().toLowerCase();
     const display = document.getElementById('city-display').value.trim();
     const tz      = document.getElementById('city-tz').value.trim();
     const active  = document.getElementById('city-active').checked;
@@ -188,8 +236,8 @@
     const errEl   = document.getElementById('modal-error');
     errEl.classList.add('d-none');
 
-    if (!slug || !display || !tz) {
-      errEl.textContent = 'City slug, display name, and timezone are required.';
+    if (!slug || !source || !display || !tz) {
+      errEl.textContent = 'City slug, source, display name, and timezone are required.';
       errEl.classList.remove('d-none');
       return;
     }
@@ -197,9 +245,9 @@
     const btn = document.getElementById('modal-save-btn');
     btn.disabled = true;
     try {
-      const body = { city: slug, display_name: display, timezone: tz, active, notes };
+      const body = { city: slug, source, display_name: display, timezone: tz, active, notes };
       if (key) {
-        await api('PUT', `/tracked-cities/${encodeURIComponent(key)}`, body);
+        await api('PUT', `/tracked-cities/${encodeURIComponent(keySrc)}/${encodeURIComponent(key)}`, body);
       } else {
         await api('POST', '/tracked-cities', body);
       }
@@ -216,17 +264,19 @@
   }
 
   let pendingDeleteCity = null;
+  let pendingDeleteSource = null;
 
-  function openDeleteModal(city) {
+  function openDeleteModal(city, source) {
     pendingDeleteCity = city;
-    document.getElementById('delete-city-name').textContent = city;
+    pendingDeleteSource = source;
+    document.getElementById('delete-city-name').textContent = `${city} (${source})`;
     deleteModal.show();
   }
 
   document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
-    if (!pendingDeleteCity) return;
+    if (!pendingDeleteCity || !pendingDeleteSource) return;
     try {
-      await api('DELETE', `/tracked-cities/${encodeURIComponent(pendingDeleteCity)}`);
+      await api('DELETE', `/tracked-cities/${encodeURIComponent(pendingDeleteSource)}/${encodeURIComponent(pendingDeleteCity)}`);
       deleteModal.hide();
       await loadCities();
     } catch (e) {
