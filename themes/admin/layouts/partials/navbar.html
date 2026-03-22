@@ -12,12 +12,17 @@
       <!-- Auth-required links (hidden until signed in) -->
       <ul class="navbar-nav me-auto" id="nav-links" style="display:none!important">
         <li class="nav-item">
-          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/items/" }} active{{ end }}"
-             href="{{ "items/" | relURL }}" title="Admin access required">
-            <i class="bi bi-list-ul me-1"></i>Items
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/tracked-cities/" }} active{{ end }}"
+             href="{{ "tracked-cities/" | relURL }}" title="Admin access required">
+            <i class="bi bi-geo me-1"></i>Cities
           </a>
         </li>
-        <!-- Add more nav items here following the same pattern -->
+        <li class="nav-item">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/snapshots/" }} active{{ end }}"
+             href="{{ "snapshots/" | relURL }}" title="Admin access required">
+            <i class="bi bi-table me-1"></i>Snapshots
+          </a>
+        </li>
       </ul>
 
       <div class="d-flex align-items-center gap-2 ms-auto" id="nav-auth">

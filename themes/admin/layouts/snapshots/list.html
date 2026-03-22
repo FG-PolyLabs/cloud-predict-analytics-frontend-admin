@@ -1,0 +1,153 @@
+{{ define "main" }}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+</div>
+
+<div id="auth-guard" class="alert alert-warning d-none">
+  <i class="bi bi-lock me-1"></i>You must be <a href="{{ "" | relURL }}">signed in</a> to view snapshots.
+</div>
+
+<!-- Filters -->
+<div class="card shadow-sm border-0 mb-3" id="filters-card">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
+        <select class="form-select form-select-sm" id="filter-city" style="min-width:140px">
+          <option value="">All cities</option>
+        </select>
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-date">Date</label>
+        <input type="date" class="form-control form-control-sm" id="filter-date">
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-limit">Limit</label>
+        <select class="form-select form-select-sm" id="filter-limit">
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="200" selected>200</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+      <div class="col-sm-auto">
+        <button class="btn btn-primary btn-sm" onclick="loadSnapshots()">
+          <i class="bi bi-search me-1"></i>Query
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="text-center py-5 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+</div>
+
+<div id="empty-state" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-2">No snapshots found for these filters.</p>
+</div>
+
+<div class="card shadow-sm border-0 d-none" id="snapshots-card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">City</th>
+            <th>Date</th>
+            <th>Timestamp (UTC)</th>
+            <th>Threshold °C</th>
+            <th>YES</th>
+            <th>NO</th>
+            <th>Spread</th>
+            <th>Vol 24h</th>
+            <th>Liquidity</th>
+            <th>Event Slug</th>
+          </tr>
+        </thead>
+        <tbody id="snapshots-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{ end }}
+
+{{ define "page-scripts" }}
+<script>
+  firebase.auth().onAuthStateChanged(async user => {
+    if (!user) {
+      document.getElementById('filters-card').classList.add('d-none');
+      document.getElementById('auth-guard').classList.remove('d-none');
+      return;
+    }
+    await populateCityFilter();
+  });
+
+  async function populateCityFilter() {
+    try {
+      const cities = await api('GET', '/tracked-cities');
+      const sel = document.getElementById('filter-city');
+      cities.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.city;
+        opt.textContent = c.display_name;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      // non-fatal — user can still type a city or leave blank
+    }
+  }
+
+  async function loadSnapshots() {
+    const city  = document.getElementById('filter-city').value;
+    const date  = document.getElementById('filter-date').value;
+    const limit = document.getElementById('filter-limit').value;
+
+    const loadingEl  = document.getElementById('loading');
+    const emptyEl    = document.getElementById('empty-state');
+    const cardEl     = document.getElementById('snapshots-card');
+
+    loadingEl.classList.remove('d-none');
+    emptyEl.classList.add('d-none');
+    cardEl.classList.add('d-none');
+
+    try {
+      const rows = await api('GET', '/snapshots' + qs({ city, date, limit }));
+      loadingEl.classList.add('d-none');
+      if (!rows || rows.length === 0) {
+        emptyEl.classList.remove('d-none');
+        return;
+      }
+      renderSnapshots(rows);
+      cardEl.classList.remove('d-none');
+    } catch (e) {
+      loadingEl.classList.add('d-none');
+      showToast('Query failed: ' + e.message, 'danger');
+    }
+  }
+
+  function renderSnapshots(rows) {
+    document.getElementById('snapshots-tbody').innerHTML = rows.map(r => `
+      <tr>
+        <td class="ps-3 fw-medium">${escHtml(r.city)}</td>
+        <td>${escHtml(r.date)}</td>
+        <td class="text-muted">${escHtml(r.timestamp)}</td>
+        <td>${r.temp_threshold}</td>
+        <td>${(r.yes_cost * 100).toFixed(1)}%</td>
+        <td>${(r.no_cost * 100).toFixed(1)}%</td>
+        <td>${r.spread != null ? r.spread.toFixed(3) : '—'}</td>
+        <td>${r.volume_24h != null ? '$' + r.volume_24h.toFixed(0) : '—'}</td>
+        <td>${r.liquidity != null ? '$' + r.liquidity.toFixed(0) : '—'}</td>
+        <td class="text-muted small font-monospace">${escHtml(r.event_slug)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function escHtml(str) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(str)));
+    return d.innerHTML;
+  }
+</script>
+{{ end }}
