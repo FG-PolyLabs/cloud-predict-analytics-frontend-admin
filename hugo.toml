@@ -1,10 +1,10 @@
 baseURL = "/"
 languageCode = "en-us"
-title = "Admin App"
+title = "Cloud Predict Admin"
 theme = "admin"
 
 [params]
-  description = "A lightweight admin interface"
+  description = "Admin interface for the cloud-predict-analytics platform"
   backendURL = "http://localhost:8080"
 
   # Firebase config — nested to match HUGO_PARAMS_FIREBASE_* env var mapping

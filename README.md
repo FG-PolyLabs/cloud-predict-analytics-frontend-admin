@@ -1,4 +1,4 @@
-# cloud-predict-analytics-frontend-admin
+# Cloud Predict Admin — cloud-predict-analytics-frontend-admin
 
 Admin frontend for the cloud-predict-analytics system. Authenticated users can manage data via the backend API; data is read from the `cloud-predict-analytics-data` repo (GitHub Raw) with GCS as fallback.
 

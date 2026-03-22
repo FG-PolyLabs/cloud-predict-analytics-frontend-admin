@@ -67,6 +67,8 @@ bash scripts/setup.sh
 | `static/css/app.css` | Minimal style overrides on top of Bootstrap 5 |
 | `content/tracked-cities/_index.md` | Tracked cities section |
 | `content/snapshots/_index.md` | Snapshots section |
+| `content/debug/_index.md` | Debug section |
+| `themes/admin/layouts/debug/list.html` | Debug page — config, auth state, connectivity checks, token viewer |
 | `.env.example` | Template for all environment variables |
 | `scripts/setup.sh` | Clones sibling repos if not already present |
 
