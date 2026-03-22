@@ -39,7 +39,7 @@ bash scripts/setup.sh
 - **Theme:** Custom theme (`themes/admin/`) — minimal Bootstrap 5 layout
 - **Auth:** Firebase Authentication (Google sign-in). Project: `collection-showcase-auth`
 - **Backend communication:** All mutations are gated behind a valid Firebase session. The `api()` helper in `static/js/api.js` attaches the ID token automatically.
-- **Data reads:** Static JSON from `cloud-predict-analytics-data` repo (GitHub Raw, primary) with GCS fallback (`weather` bucket in `fg-polylabs`), via `static/js/data-loader.js`.
+- **Data reads:** Static JSON from `cloud-predict-analytics-data` repo (GitHub Raw, primary) with GCS fallback (`weather-data` bucket in `fg-polylabs`), via `static/js/data-loader.js`.
 - **Deployment:** GitHub Pages via GitHub Actions (`.github/workflows/deploy.yml`).
 
 ### GCP Infrastructure
