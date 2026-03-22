@@ -102,7 +102,7 @@
       {
         label: "Backend /health",
         url:   backendUrl + "/health",
-        isJson: true,
+        authenticated: true,
       },
       {
         label: "GitHub data repo",
@@ -116,13 +116,21 @@
 
     setTable("tbl-connectivity", checks.map(c => row(c.label, "checking…", "")));
 
-    const rows = await Promise.all(checks.map(async (c, i) => {
+    const rows = await Promise.all(checks.map(async (c) => {
       try {
-        const res = await fetch(c.url, { method: "GET", cache: "no-store" });
-        const ok = res.ok || res.status === 400; // 400 from GCS means bucket exists but needs path
-        return row(c.label, ok ? `${res.status} OK` : `${res.status} Error`, ok ? "ok" : "error");
+        let res;
+        if (c.authenticated) {
+          // Use api() so the Firebase token is attached
+          await api("GET", "/health");
+          return row(c.label, "200 OK", "ok");
+        } else {
+          res = await fetch(c.url, { method: "GET", cache: "no-store" });
+          const ok = res.ok || res.status === 400; // 400 from GCS means bucket exists but path needed
+          return row(c.label, ok ? `${res.status} OK` : `${res.status} Error`, ok ? "ok" : "error");
+        }
       } catch (e) {
-        return row(c.label, "unreachable", "error");
+        const status = e.message?.match(/^\d+$/) ? `${e.message} Error` : "unreachable";
+        return row(c.label, status, "error");
       }
     }));
 
