@@ -29,6 +29,14 @@
     </div>
   </div>
 
+  <!-- Backend Info -->
+  <div class="card mb-4">
+    <div class="card-header fw-semibold"><i class="bi bi-server me-2"></i>Backend Info</div>
+    <div class="card-body p-0">
+      <table class="table table-sm table-striped mb-0" id="tbl-backend-info"></table>
+    </div>
+  </div>
+
   <!-- Connectivity -->
   <div class="card mb-4">
     <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
@@ -102,7 +110,6 @@
       {
         label: "Backend /health",
         url:   backendUrl + "/health",
-        authenticated: true,
       },
       {
         label: "GitHub data repo",
@@ -118,19 +125,11 @@
 
     const rows = await Promise.all(checks.map(async (c) => {
       try {
-        let res;
-        if (c.authenticated) {
-          // Use api() so the Firebase token is attached
-          await api("GET", "/health");
-          return row(c.label, "200 OK", "ok");
-        } else {
-          res = await fetch(c.url, { method: "GET", cache: "no-store" });
-          const ok = res.ok || res.status === 400; // 400 from GCS means bucket exists but path needed
-          return row(c.label, ok ? `${res.status} OK` : `${res.status} Error`, ok ? "ok" : "error");
-        }
+        const res = await fetch(c.url, { method: "GET", cache: "no-store" });
+        const ok = res.ok || res.status === 400; // 400 from GCS means bucket exists but path needed
+        return row(c.label, ok ? `${res.status} OK` : `${res.status} Error`, ok ? "ok" : "error");
       } catch (e) {
-        const status = e.message?.match(/^\d+$/) ? `${e.message} Error` : "unreachable";
-        return row(c.label, status, "error");
+        return row(c.label, "unreachable", "error");
       }
     }));
 
@@ -202,6 +201,15 @@
 
     // Token box
     document.getElementById("token-box").value = token;
+
+    // Backend info
+    setTable("tbl-backend-info", [row("", "loading…", "")]);
+    try {
+      const info = await api("GET", "/info");
+      setTable("tbl-backend-info", Object.entries(info).map(([k, v]) => row(k, v)));
+    } catch (e) {
+      setTable("tbl-backend-info", [row("error", e.message, "error")]);
+    }
 
     // Connectivity checks
     runChecks();
