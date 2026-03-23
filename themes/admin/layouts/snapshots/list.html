@@ -1,5 +1,5 @@
 {{ define "main" }}
-<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
@@ -23,79 +23,86 @@
   <i class="bi bi-lock me-1"></i>You must be <a href="{{ "" | relURL }}">signed in</a> to view snapshots.
 </div>
 
-<!-- Filters -->
-<div class="card shadow-sm border-0 mb-3" id="filters-card">
-  <div class="card-body py-3">
-    <div class="row g-2 align-items-end">
-      <div class="col-sm-auto">
-        <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
-        <select class="form-select form-select-sm" id="filter-city" style="min-width:140px">
-          <option value="">All cities</option>
-        </select>
-      </div>
-      <div class="col-sm-auto">
-        <label class="form-label small fw-medium mb-1" for="filter-date">Date</label>
-        <input type="date" class="form-control form-control-sm" id="filter-date">
-      </div>
-      <div class="col-sm-auto">
-        <label class="form-label small fw-medium mb-1" for="filter-limit">Limit</label>
-        <select class="form-select form-select-sm" id="filter-limit">
-          <option value="50">50</option>
-          <option value="100">100</option>
-          <option value="200" selected>200</option>
-          <option value="500">500</option>
-        </select>
-      </div>
-      <div class="col-sm-auto">
-        <button class="btn btn-primary btn-sm" onclick="loadSnapshots()">
-          <i class="bi bi-search me-1"></i>Query
-        </button>
-      </div>
-      <div class="col-sm-auto">
-        <span id="source-badge" class="badge bg-secondary d-none"></span>
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3" id="snapshot-tabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-polymarket-btn" data-bs-toggle="tab" data-bs-target="#tab-polymarket" type="button" role="tab">
+      Polymarket Snapshot
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content" id="snapshot-tab-content">
+  <!-- Polymarket Snapshot tab -->
+  <div class="tab-pane fade show active" id="tab-polymarket" role="tabpanel">
+
+    <!-- Filters -->
+    <div class="card shadow-sm border-0 mb-3" id="filters-card">
+      <div class="card-body py-3">
+        <div class="row g-2 align-items-end">
+          <div class="col-sm-auto">
+            <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
+            <select class="form-select form-select-sm" id="filter-city" style="min-width:140px">
+              <option value="">All cities</option>
+            </select>
+          </div>
+          <div class="col-sm-auto">
+            <label class="form-label small fw-medium mb-1" for="filter-date">Date</label>
+            <input type="date" class="form-control form-control-sm" id="filter-date">
+          </div>
+          <div class="col-sm-auto">
+            <label class="form-label small fw-medium mb-1" for="filter-limit">Limit</label>
+            <select class="form-select form-select-sm" id="filter-limit">
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+            </select>
+          </div>
+          <div class="col-sm-auto">
+            <button class="btn btn-primary btn-sm" onclick="loadSnapshots()">
+              <i class="bi bi-search me-1"></i>Query
+            </button>
+          </div>
+          <div class="col-sm-auto">
+            <span id="source-badge" class="badge bg-secondary d-none"></span>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-</div>
 
-<div id="loading" class="text-center py-5 d-none">
-  <div class="spinner-border text-primary" role="status"></div>
-</div>
-
-<div id="empty-state" class="text-center py-5 d-none">
-  <i class="bi bi-inbox fs-1 text-muted"></i>
-  <p class="text-muted mt-2">No snapshots found for these filters.</p>
-</div>
-
-<div class="card shadow-sm border-0 d-none" id="snapshots-card">
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-hover align-middle mb-0 small">
-        <thead class="table-light">
-          <tr>
-            <th class="ps-3">City</th>
-            <th>Date</th>
-            <th>Timestamp (UTC)</th>
-            <th>Threshold °C</th>
-            <th>YES</th>
-            <th>NO</th>
-            <th>Spread</th>
-            <th>Vol 24h</th>
-            <th>Liquidity</th>
-            <th>Event Slug</th>
-          </tr>
-        </thead>
-        <tbody id="snapshots-tbody"></tbody>
-      </table>
+    <div id="loading" class="text-center py-5 d-none">
+      <div class="spinner-border text-primary" role="status"></div>
     </div>
+
+    <div id="empty-state" class="text-center py-5 d-none">
+      <i class="bi bi-inbox fs-1 text-muted"></i>
+      <p class="text-muted mt-2">No snapshots found for these filters.</p>
+    </div>
+
+    <div class="card shadow-sm border-0 d-none" id="snapshots-card">
+      <div class="card-body">
+        <canvas id="snapshots-chart" style="max-height:480px"></canvas>
+      </div>
+    </div>
+
   </div>
 </div>
 {{ end }}
 
 {{ define "page-scripts" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
   let currentSource = 'api';
-  let staticSnapshots = null; // cached data for GitHub/GCS sources
+  let staticSnapshots = null;
+  let snapshotsChart = null;
+
+  // Palette for threshold lines
+  const LINE_COLORS = [
+    '#0d6efd','#dc3545','#198754','#fd7e14','#6f42c1',
+    '#20c997','#ffc107','#0dcaf0','#6610f2','#d63384',
+  ];
 
   firebase.auth().onAuthStateChanged(async user => {
     if (!user) {
@@ -123,7 +130,7 @@
 
   function setSource(source) {
     currentSource = source;
-    staticSnapshots = null; // clear cache when switching source
+    staticSnapshots = null;
     ['github', 'gcs', 'api'].forEach(s => {
       document.getElementById(`btn-src-${s}`).classList.toggle('active', s === source);
     });
@@ -153,15 +160,14 @@
       let rows;
 
       if (currentSource === 'github' || currentSource === 'gcs') {
-        // Load the full static dump once, then filter client-side.
         if (!staticSnapshots) {
           staticSnapshots = currentSource === 'github'
             ? await loadFromGitHub('data/snapshots.jsonl')
             : await loadFromGCS('data/snapshots.jsonl');
         }
         rows = staticSnapshots;
-        if (city)  rows = rows.filter(r => r.city === city);
-        if (date)  rows = rows.filter(r => r.date === date);
+        if (city) rows = rows.filter(r => r.city === city);
+        if (date) rows = rows.filter(r => r.date === date);
         rows = rows.slice(0, limit);
       } else {
         rows = await api('GET', '/snapshots' + qs({ city, date, limit }));
@@ -172,12 +178,67 @@
         emptyEl.classList.remove('d-none');
         return;
       }
-      renderSnapshots(rows);
+      renderChart(rows);
       cardEl.classList.remove('d-none');
     } catch (e) {
       loadingEl.classList.add('d-none');
       showToast('Query failed (' + currentSource + '): ' + e.message, 'danger');
     }
+  }
+
+  function renderChart(rows) {
+    // Group rows by threshold, sorted by timestamp
+    rows.sort((a, b) => a.timestamp < b.timestamp ? -1 : 1);
+
+    const byThreshold = {};
+    rows.forEach(r => {
+      const key = r.temp_threshold;
+      if (!byThreshold[key]) byThreshold[key] = [];
+      byThreshold[key].push({ x: r.timestamp, y: +(r.yes_cost * 100).toFixed(2) });
+    });
+
+    const thresholds = Object.keys(byThreshold).sort((a, b) => +a - +b);
+    const datasets = thresholds.map((t, i) => ({
+      label: `${t}°C`,
+      data: byThreshold[t],
+      borderColor: LINE_COLORS[i % LINE_COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      pointRadius: byThreshold[t].length > 60 ? 0 : 3,
+      tension: 0.3,
+    }));
+
+    if (snapshotsChart) snapshotsChart.destroy();
+
+    snapshotsChart = new Chart(document.getElementById('snapshots-chart'), {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: { tooltipFormat: 'MMM d, HH:mm', displayFormats: { hour: 'MMM d HH:mm', day: 'MMM d' } },
+            title: { display: true, text: 'Timestamp (UTC)' },
+          },
+          y: {
+            min: 0,
+            max: 100,
+            title: { display: true, text: 'YES %' },
+            ticks: { callback: v => v + '%' },
+          },
+        },
+      },
+    });
   }
 
   async function runSync() {
@@ -194,39 +255,16 @@
         `GitHub: ${result.github ? '✓' : (result.github_skipped ? 'skipped (no token)' : '✗')}`,
       ];
       showToast(parts.join(' | '), tc.gcs && sn.gcs ? 'success' : 'warning');
-      if (tc.error)  showToast('Cities error: '    + tc.error,  'danger');
-      if (sn.error)  showToast('Snapshots error: ' + sn.error,  'danger');
+      if (tc.error) showToast('Cities error: ' + tc.error, 'danger');
+      if (sn.error) showToast('Snapshots error: ' + sn.error, 'danger');
       if (result.github_errors) result.github_errors.forEach(e => showToast('GitHub: ' + e, 'danger'));
-      staticSnapshots = null; // invalidate cache after sync
+      staticSnapshots = null;
     } catch (e) {
       showToast('Sync failed: ' + e.message, 'danger');
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync to GCS';
     }
-  }
-
-  function renderSnapshots(rows) {
-    document.getElementById('snapshots-tbody').innerHTML = rows.map(r => `
-      <tr>
-        <td class="ps-3 fw-medium">${escHtml(r.city)}</td>
-        <td>${escHtml(r.date)}</td>
-        <td class="text-muted">${escHtml(r.timestamp)}</td>
-        <td>${r.temp_threshold}</td>
-        <td>${(r.yes_cost * 100).toFixed(1)}%</td>
-        <td>${(r.no_cost * 100).toFixed(1)}%</td>
-        <td>${r.spread != null ? r.spread.toFixed(3) : '—'}</td>
-        <td>${r.volume_24h != null ? '$' + r.volume_24h.toFixed(0) : '—'}</td>
-        <td>${r.liquidity != null ? '$' + r.liquidity.toFixed(0) : '—'}</td>
-        <td class="text-muted small font-monospace">${escHtml(r.event_slug)}</td>
-      </tr>
-    `).join('');
-  }
-
-  function escHtml(str) {
-    const d = document.createElement('div');
-    d.appendChild(document.createTextNode(String(str)));
-    return d.innerHTML;
   }
 </script>
 {{ end }}
