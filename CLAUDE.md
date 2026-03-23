@@ -17,9 +17,9 @@ FutureGadgetLabs/
 
 | Repo | GitHub | Role |
 |------|--------|------|
-| `cloud-predict-analytics-frontend-admin` | https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin | Admin-only UI; authenticated CRUD via backend API; reads JSON from data repo or GCS |
-| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Two parts: (1) Cloud Run API service (`weather-api`) for all mutations; (2) Cloud Run scheduled job (`weather-polymarket`) that fetches/updates data on a daily schedule |
-| `cloud-predict-analytics-data` | https://github.com/FG-PolyLabs/cloud-predict-analytics-data | JSON data files updated by the backend; also hosts the public (non-admin) frontend |
+| `cloud-predict-analytics-frontend-admin` | https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin | Admin-only UI; authenticated CRUD via backend API; reads JSONL from data repo or GCS |
+| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Three parts: (1) Cloud Run API service (`weather-api`) for all mutations; (2) Cloud Run job (`weather-polymarket`) that fetches Polymarket data daily; (3) Cloud Run job (`weather-sync`) that exports BigQuery → GCS + GitHub |
+| `cloud-predict-analytics-data` | https://github.com/FG-PolyLabs/cloud-predict-analytics-data | JSONL data files written by `weather-sync`; also hosts the public (non-admin) frontend |
 
 ### First-Time Setup
 
@@ -39,7 +39,7 @@ bash scripts/setup.sh
 - **Theme:** Custom theme (`themes/admin/`) — minimal Bootstrap 5 layout
 - **Auth:** Firebase Authentication (Google sign-in). Project: `collection-showcase-auth`
 - **Backend communication:** All mutations are gated behind a valid Firebase session. The `api()` helper in `static/js/api.js` attaches the ID token automatically.
-- **Data reads:** Static JSON from `cloud-predict-analytics-data` repo (GitHub Raw, primary) with GCS fallback (`fg-polylabs-weather-data` bucket in `fg-polylabs`), via `static/js/data-loader.js`.
+- **Data reads:** Cascades GitHub Raw → GCS → live API. Pages try GitHub first, fall back to GCS, then fall back to the backend API. Users can also manually lock to a specific source via the source buttons. Implemented via `static/js/data-loader.js`.
 - **Deployment:** GitHub Pages via GitHub Actions (`.github/workflows/deploy.yml`).
 
 ### GCP Infrastructure
@@ -48,9 +48,10 @@ bash scripts/setup.sh
 |----------|---------|
 | GCP Project | `fg-polylabs` |
 | Cloud Run API | `weather-api` — `us-central1` |
-| Cloud Run Job | `weather-polymarket` — `us-central1`, runs daily |
+| Cloud Run Job | `weather-polymarket` — `us-central1`, runs daily at 01:00 UTC |
+| Cloud Run Job | `weather-sync` — `us-central1`, runs daily at 03:00 UTC; exports BQ → GCS + GitHub |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
-| GCS Bucket | `weather` in `fg-polylabs` (managed by `cloud-predict-analytics-data` repo) |
+| GCS Bucket | `fg-polylabs-weather-data` in `fg-polylabs` |
 | Firebase Project | `collection-showcase-auth` |
 
 ### Key Files
@@ -62,12 +63,14 @@ bash scripts/setup.sh
 | `themes/admin/layouts/partials/` | head, navbar, footer, scripts partials |
 | `static/js/firebase-init.js` | Firebase app init, `authSignOut()`, `isEmailAllowed()`, auth state listener |
 | `static/js/api.js` | Authenticated `api(method, path, body)` helper + `qs()` query builder |
-| `static/js/app.js` | Global `showToast()` utility |
-| `static/js/data-loader.js` | `loadJsonData(filename)` — GitHub-first, GCS-fallback data fetching |
+| `static/js/app.js` | Global `showToast()` utility; Bootstrap tooltip initialization |
+| `static/js/data-loader.js` | `loadFromGitHub(filename)` and `loadFromGCS(filename)` — static JSONL data fetching |
 | `static/css/app.css` | Minimal style overrides on top of Bootstrap 5 |
 | `content/tracked-cities/_index.md` | Tracked cities section |
 | `content/snapshots/_index.md` | Snapshots section |
 | `content/debug/_index.md` | Debug section |
+| `themes/admin/layouts/tracked-cities/list.html` | Cities CRUD — list, add, edit, delete; source cascade + sync |
+| `themes/admin/layouts/snapshots/list.html` | Snapshots — Chart.js line chart + table toggle; date range; backfill modal |
 | `themes/admin/layouts/debug/list.html` | Debug page — config, auth state, connectivity checks, token viewer |
 | `.env.example` | Template for all environment variables |
 | `scripts/setup.sh` | Clones sibling repos if not already present |
@@ -88,6 +91,7 @@ bash scripts/setup.sh
 - The `split .Site.Params.allowed.emails ","` pattern in `head.html` converts the comma-separated email string to a JS array
 - To add a new CRUD section: create `content/<section>/_index.md`, add a nav link in `navbar.html`, and create `themes/admin/layouts/<section>/list.html`
 - The default `list.html` provides a working CRUD template — update `RESOURCE_PATH` to your backend endpoint
+- Source cascade order (auto mode): GitHub Raw → GCS → backend API. Clicking a source button locks to that source explicitly.
 
 ### Working Across Repos
 
