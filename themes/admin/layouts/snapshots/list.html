@@ -3,13 +3,13 @@
   <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
-      <button type="button" class="btn btn-outline-secondary" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
+      <button type="button" class="btn btn-outline-secondary active" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
         <i class="bi bi-github me-1"></i>GitHub
       </button>
       <button type="button" class="btn btn-outline-secondary" id="btn-src-gcs" onclick="setSource('gcs')" title="Load from GCS bucket">
         <i class="bi bi-cloud me-1"></i>GCS
       </button>
-      <button type="button" class="btn btn-outline-secondary active" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
         <i class="bi bi-database me-1"></i>API
       </button>
     </div>
@@ -98,9 +98,9 @@
             <select class="form-select form-select-sm" id="filter-limit">
               <option value="50">50</option>
               <option value="100">100</option>
-              <option value="200" selected>200</option>
+              <option value="200">200</option>
               <option value="500">500</option>
-              <option value="0">No limit</option>
+              <option value="0" selected>No limit</option>
             </select>
           </div>
           <div class="col-sm-auto">
@@ -168,7 +168,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
-  let currentSource = 'api';
+  // 'auto' = cascade github → gcs → api; explicit = user locked a source
+  let currentSource = 'auto';
   let staticSnapshots = null;
   let snapshotsChart = null;
   let lastRows = [];
@@ -210,17 +211,26 @@
   }
 
   function setSource(source) {
+    // Explicit user selection — lock to this source
     currentSource = source;
     staticSnapshots = null;
+    markSourceButton(source);
+    updateSourceBadge(source);
+  }
+
+  function markSourceButton(source) {
     ['github', 'gcs', 'api'].forEach(s => {
       document.getElementById(`btn-src-${s}`).classList.toggle('active', s === source);
     });
+  }
+
+  function updateSourceBadge(source) {
     const badge = document.getElementById('source-badge');
-    if (source !== 'api') {
+    if (source === 'api') {
+      badge.classList.add('d-none');
+    } else {
       badge.textContent = `data from ${source} (last sync)`;
       badge.classList.remove('d-none');
-    } else {
-      badge.classList.add('d-none');
     }
   }
 
@@ -250,20 +260,51 @@
 
     try {
       let rows;
+      let resolvedSource = currentSource;
 
-      if (currentSource === 'github' || currentSource === 'gcs') {
-        if (!staticSnapshots) {
-          staticSnapshots = currentSource === 'github'
-            ? await loadFromGitHub('data/snapshots.jsonl')
-            : await loadFromGCS('data/snapshots.jsonl');
+      if (currentSource === 'auto' || currentSource === 'github' || currentSource === 'gcs') {
+        // Determine which static sources to try
+        const tryOrder = currentSource === 'auto' ? ['github', 'gcs'] :
+                         currentSource === 'github' ? ['github'] : ['gcs'];
+
+        let loaded = false;
+        for (const src of tryOrder) {
+          try {
+            staticSnapshots = src === 'github'
+              ? await loadFromGitHub('data/snapshots.jsonl')
+              : await loadFromGCS('data/snapshots.jsonl');
+            resolvedSource = src;
+            loaded = true;
+            break;
+          } catch (e) {
+            if (currentSource !== 'auto') throw e; // explicit source — don't fall through
+            // auto: try next source
+          }
         }
-        rows = staticSnapshots;
-        if (city)     rows = rows.filter(r => r.city === city);
-        if (dateFrom) rows = rows.filter(r => r.date >= dateFrom);
-        if (dateTo)   rows = rows.filter(r => r.date <= dateTo);
-        if (limit !== '0') rows = rows.slice(0, parseInt(limit));
-      } else {
-        // dateFrom == dateTo → use single date param for simpler BQ query
+
+        if (!loaded) {
+          // All static sources failed — fall back to API
+          resolvedSource = 'api';
+        }
+
+        if (resolvedSource !== 'api') {
+          if (currentSource === 'auto') {
+            markSourceButton(resolvedSource);
+            updateSourceBadge(resolvedSource);
+          }
+          rows = staticSnapshots;
+          if (city)     rows = rows.filter(r => r.city === city);
+          if (dateFrom) rows = rows.filter(r => r.date >= dateFrom);
+          if (dateTo)   rows = rows.filter(r => r.date <= dateTo);
+          if (limit !== '0') rows = rows.slice(0, parseInt(limit));
+        }
+      }
+
+      if (resolvedSource === 'api') {
+        if (currentSource === 'auto') {
+          markSourceButton('api');
+          updateSourceBadge('api');
+        }
         const params = { city, limit };
         if (dateFrom && dateTo && dateFrom === dateTo) {
           params.date = dateFrom;
