@@ -152,6 +152,7 @@
                 <th>Date</th>
                 <th>Timestamp (UTC)</th>
                 <th>Threshold °C</th>
+                <th>Market End</th>
                 <th>YES</th>
                 <th>NO</th>
                 <th>Spread</th>
@@ -341,23 +342,37 @@
   function renderChart(rows) {
     rows.sort((a, b) => a.timestamp < b.timestamp ? -1 : 1);
 
-    const byThreshold = {};
+    // Group by (city, temp_threshold, market_end_date) so each market is a unique line
+    const byMarket = {};
     rows.forEach(r => {
-      const key = r.temp_threshold;
-      if (!byThreshold[key]) byThreshold[key] = [];
-      byThreshold[key].push({ x: r.timestamp, y: +(r.yes_cost * 100).toFixed(2) });
+      const key = `${r.city}|${r.temp_threshold}|${r.market_end_date}`;
+      if (!byMarket[key]) byMarket[key] = { city: r.city, threshold: r.temp_threshold, endDate: r.market_end_date, points: [] };
+      byMarket[key].points.push({ x: r.timestamp, y: +(r.yes_cost * 100).toFixed(2) });
     });
 
-    const thresholds = Object.keys(byThreshold).sort((a, b) => +a - +b);
-    const datasets = thresholds.map((t, i) => ({
-      label: `${t}°C`,
-      data: byThreshold[t],
-      borderColor: LINE_COLORS[i % LINE_COLORS.length],
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      pointRadius: byThreshold[t].length > 60 ? 0 : 3,
-      tension: 0.3,
-    }));
+    const markets = Object.values(byMarket).sort((a, b) => {
+      if (a.city !== b.city) return a.city.localeCompare(b.city);
+      if (a.threshold !== b.threshold) return +a.threshold - +b.threshold;
+      return a.endDate < b.endDate ? -1 : 1;
+    });
+
+    // Check if multi-city to decide label verbosity
+    const cities = new Set(rows.map(r => r.city));
+    const multiCity = cities.size > 1;
+
+    const datasets = markets.map((m, i) => {
+      const cityPart = multiCity ? `${m.city} ` : '';
+      const label = `${cityPart}${m.threshold}°C → ${m.endDate}`;
+      return {
+        label,
+        data: m.points,
+        borderColor: LINE_COLORS[i % LINE_COLORS.length],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: m.points.length > 60 ? 0 : 3,
+        tension: 0.3,
+      };
+    });
 
     if (snapshotsChart) snapshotsChart.destroy();
 
@@ -399,6 +414,7 @@
         <td>${escHtml(r.date)}</td>
         <td class="text-muted">${escHtml(r.timestamp)}</td>
         <td>${r.temp_threshold}</td>
+        <td>${escHtml(r.market_end_date ?? '—')}</td>
         <td>${(r.yes_cost * 100).toFixed(1)}%</td>
         <td>${(r.no_cost * 100).toFixed(1)}%</td>
         <td>${r.spread != null ? r.spread.toFixed(3) : '—'}</td>
