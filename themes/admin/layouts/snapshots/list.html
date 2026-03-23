@@ -16,6 +16,45 @@
     <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Dump snapshot data to GCS and GitHub">
       <i class="bi bi-arrow-repeat me-1"></i>Sync to GCS
     </button>
+    <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#backfill-modal" title="Backfill historical snapshots">
+      <i class="bi bi-clock-history me-1"></i>Backfill
+    </button>
+  </div>
+</div>
+
+<!-- Backfill Modal -->
+<div class="modal fade" id="backfill-modal" tabindex="-1" aria-labelledby="backfill-modal-label" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="backfill-modal-label"><i class="bi bi-clock-history me-2"></i>Backfill Snapshots</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Triggers the <code>weather-polymarket</code> Cloud Run job for the selected date range. Existing rows are skipped (merge on city + timestamp + threshold).</p>
+        <div class="mb-3">
+          <label class="form-label fw-medium" for="bf-date-from">From</label>
+          <input type="date" class="form-control" id="bf-date-from">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-medium" for="bf-date-to">To</label>
+          <input type="date" class="form-control" id="bf-date-to">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-medium" for="bf-city">City <span class="text-muted fw-normal">(optional — leave blank for all active cities)</span></label>
+          <select class="form-select" id="bf-city">
+            <option value="">All active cities</option>
+          </select>
+        </div>
+        <div id="bf-result" class="d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="bf-submit" onclick="runBackfill()">
+          <i class="bi bi-play-fill me-1"></i>Run Backfill
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -156,12 +195,14 @@
   async function populateCityFilter() {
     try {
       const cities = await api('GET', '/tracked-cities');
-      const sel = document.getElementById('filter-city');
-      cities.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.city;
-        opt.textContent = c.display_name;
-        sel.appendChild(opt);
+      ['filter-city', 'bf-city'].forEach(id => {
+        const sel = document.getElementById(id);
+        cities.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.city;
+          opt.textContent = c.display_name;
+          sel.appendChild(opt);
+        });
       });
     } catch (e) {
       // non-fatal
@@ -344,6 +385,40 @@
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync to GCS';
+    }
+  }
+
+  async function runBackfill() {
+    const dateFrom = document.getElementById('bf-date-from').value;
+    const dateTo   = document.getElementById('bf-date-to').value;
+    const city     = document.getElementById('bf-city').value;
+
+    if (!dateFrom || !dateTo) {
+      showToast('Please select both From and To dates.', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('bf-submit');
+    const resultEl = document.getElementById('bf-result');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting…';
+    resultEl.classList.add('d-none');
+
+    try {
+      const result = await api('POST', '/backfill', { date_from: dateFrom, date_to: dateTo, city });
+      resultEl.className = 'alert alert-success small';
+      resultEl.innerHTML =
+        `<strong>Backfill triggered</strong> — ${result.days} day(s): ${result.date_from} → ${result.date_to}` +
+        (result.city ? ` for <strong>${escHtml(result.city)}</strong>` : ' for all active cities') +
+        `<br><span class="text-muted font-monospace">${escHtml(result.execution)}</span>`;
+      resultEl.classList.remove('d-none');
+    } catch (e) {
+      resultEl.className = 'alert alert-danger small';
+      resultEl.textContent = 'Backfill failed: ' + e.message;
+      resultEl.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Backfill';
     }
   }
 
