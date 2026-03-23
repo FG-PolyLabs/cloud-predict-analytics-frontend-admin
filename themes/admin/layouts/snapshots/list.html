@@ -47,8 +47,12 @@
             </select>
           </div>
           <div class="col-sm-auto">
-            <label class="form-label small fw-medium mb-1" for="filter-date">Date</label>
-            <input type="date" class="form-control form-control-sm" id="filter-date">
+            <label class="form-label small fw-medium mb-1" for="filter-date-from">From</label>
+            <input type="date" class="form-control form-control-sm" id="filter-date-from">
+          </div>
+          <div class="col-sm-auto">
+            <label class="form-label small fw-medium mb-1" for="filter-date-to">To</label>
+            <input type="date" class="form-control form-control-sm" id="filter-date-to">
           </div>
           <div class="col-sm-auto">
             <label class="form-label small fw-medium mb-1" for="filter-limit">Limit</label>
@@ -57,6 +61,7 @@
               <option value="100">100</option>
               <option value="200" selected>200</option>
               <option value="500">500</option>
+              <option value="0">No limit</option>
             </select>
           </div>
           <div class="col-sm-auto">
@@ -64,8 +69,12 @@
               <i class="bi bi-search me-1"></i>Query
             </button>
           </div>
-          <div class="col-sm-auto">
+          <div class="col-sm-auto ms-auto d-flex align-items-center gap-2">
             <span id="source-badge" class="badge bg-secondary d-none"></span>
+            <div class="form-check form-switch mb-0" title="Toggle chart / table">
+              <input class="form-check-input" type="checkbox" role="switch" id="view-toggle" checked onchange="toggleView()">
+              <label class="form-check-label small" for="view-toggle" id="view-toggle-label">Chart</label>
+            </div>
           </div>
         </div>
       </div>
@@ -80,9 +89,35 @@
       <p class="text-muted mt-2">No snapshots found for these filters.</p>
     </div>
 
-    <div class="card shadow-sm border-0 d-none" id="snapshots-card">
+    <!-- Chart view -->
+    <div class="card shadow-sm border-0 d-none" id="snapshots-chart-card">
       <div class="card-body">
         <canvas id="snapshots-chart" style="max-height:480px"></canvas>
+      </div>
+    </div>
+
+    <!-- Table view -->
+    <div class="card shadow-sm border-0 d-none" id="snapshots-table-card">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0 small">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">City</th>
+                <th>Date</th>
+                <th>Timestamp (UTC)</th>
+                <th>Threshold °C</th>
+                <th>YES</th>
+                <th>NO</th>
+                <th>Spread</th>
+                <th>Vol 24h</th>
+                <th>Liquidity</th>
+                <th>Event Slug</th>
+              </tr>
+            </thead>
+            <tbody id="snapshots-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -97,8 +132,9 @@
   let currentSource = 'api';
   let staticSnapshots = null;
   let snapshotsChart = null;
+  let lastRows = [];
+  let chartMode = true; // true = chart, false = table
 
-  // Palette for threshold lines
   const LINE_COLORS = [
     '#0d6efd','#dc3545','#198754','#fd7e14','#6f42c1',
     '#20c997','#ffc107','#0dcaf0','#6610f2','#d63384',
@@ -110,6 +146,10 @@
       document.getElementById('auth-guard').classList.remove('d-none');
       return;
     }
+    // Default date range: today
+    const today = new Date().toISOString().slice(0, 10);
+    document.getElementById('filter-date-from').value = today;
+    document.getElementById('filter-date-to').value = today;
     await populateCityFilter();
   });
 
@@ -143,18 +183,29 @@
     }
   }
 
-  async function loadSnapshots() {
-    const city  = document.getElementById('filter-city').value;
-    const date  = document.getElementById('filter-date').value;
-    const limit = parseInt(document.getElementById('filter-limit').value) || 200;
+  function toggleView() {
+    chartMode = document.getElementById('view-toggle').checked;
+    document.getElementById('view-toggle-label').textContent = chartMode ? 'Chart' : 'Table';
+    if (lastRows.length === 0) return;
+    document.getElementById('snapshots-chart-card').classList.toggle('d-none', !chartMode);
+    document.getElementById('snapshots-table-card').classList.toggle('d-none', chartMode);
+  }
 
-    const loadingEl = document.getElementById('loading');
-    const emptyEl   = document.getElementById('empty-state');
-    const cardEl    = document.getElementById('snapshots-card');
+  async function loadSnapshots() {
+    const city     = document.getElementById('filter-city').value;
+    const dateFrom = document.getElementById('filter-date-from').value;
+    const dateTo   = document.getElementById('filter-date-to').value;
+    const limit    = document.getElementById('filter-limit').value; // "0" = no limit
+
+    const loadingEl    = document.getElementById('loading');
+    const emptyEl      = document.getElementById('empty-state');
+    const chartCardEl  = document.getElementById('snapshots-chart-card');
+    const tableCardEl  = document.getElementById('snapshots-table-card');
 
     loadingEl.classList.remove('d-none');
     emptyEl.classList.add('d-none');
-    cardEl.classList.add('d-none');
+    chartCardEl.classList.add('d-none');
+    tableCardEl.classList.add('d-none');
 
     try {
       let rows;
@@ -166,11 +217,20 @@
             : await loadFromGCS('data/snapshots.jsonl');
         }
         rows = staticSnapshots;
-        if (city) rows = rows.filter(r => r.city === city);
-        if (date) rows = rows.filter(r => r.date === date);
-        rows = rows.slice(0, limit);
+        if (city)     rows = rows.filter(r => r.city === city);
+        if (dateFrom) rows = rows.filter(r => r.date >= dateFrom);
+        if (dateTo)   rows = rows.filter(r => r.date <= dateTo);
+        if (limit !== '0') rows = rows.slice(0, parseInt(limit));
       } else {
-        rows = await api('GET', '/snapshots' + qs({ city, date, limit }));
+        // dateFrom == dateTo → use single date param for simpler BQ query
+        const params = { city, limit };
+        if (dateFrom && dateTo && dateFrom === dateTo) {
+          params.date = dateFrom;
+        } else {
+          if (dateFrom) params.date_from = dateFrom;
+          if (dateTo)   params.date_to   = dateTo;
+        }
+        rows = await api('GET', '/snapshots' + qs(params));
       }
 
       loadingEl.classList.add('d-none');
@@ -178,8 +238,12 @@
         emptyEl.classList.remove('d-none');
         return;
       }
+
+      lastRows = rows;
       renderChart(rows);
-      cardEl.classList.remove('d-none');
+      renderTable(rows);
+      chartCardEl.classList.toggle('d-none', !chartMode);
+      tableCardEl.classList.toggle('d-none', chartMode);
     } catch (e) {
       loadingEl.classList.add('d-none');
       showToast('Query failed (' + currentSource + '): ' + e.message, 'danger');
@@ -187,7 +251,6 @@
   }
 
   function renderChart(rows) {
-    // Group rows by threshold, sorted by timestamp
     rows.sort((a, b) => a.timestamp < b.timestamp ? -1 : 1);
 
     const byThreshold = {};
@@ -241,6 +304,23 @@
     });
   }
 
+  function renderTable(rows) {
+    document.getElementById('snapshots-tbody').innerHTML = rows.map(r => `
+      <tr>
+        <td class="ps-3 fw-medium">${escHtml(r.city)}</td>
+        <td>${escHtml(r.date)}</td>
+        <td class="text-muted">${escHtml(r.timestamp)}</td>
+        <td>${r.temp_threshold}</td>
+        <td>${(r.yes_cost * 100).toFixed(1)}%</td>
+        <td>${(r.no_cost * 100).toFixed(1)}%</td>
+        <td>${r.spread != null ? r.spread.toFixed(3) : '—'}</td>
+        <td>${r.volume_24h != null ? '$' + r.volume_24h.toFixed(0) : '—'}</td>
+        <td>${r.liquidity != null ? '$' + r.liquidity.toFixed(0) : '—'}</td>
+        <td class="text-muted small font-monospace">${escHtml(r.event_slug)}</td>
+      </tr>
+    `).join('');
+  }
+
   async function runSync() {
     const btn = document.getElementById('btn-sync');
     btn.disabled = true;
@@ -265,6 +345,12 @@
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync to GCS';
     }
+  }
+
+  function escHtml(str) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(str)));
+    return d.innerHTML;
   }
 </script>
 {{ end }}
