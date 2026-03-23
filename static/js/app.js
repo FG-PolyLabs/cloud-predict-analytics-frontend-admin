@@ -1,3 +1,10 @@
+// Initialize Bootstrap tooltips on every page
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+    new bootstrap.Tooltip(el, { trigger: "hover focus" })
+  );
+});
+
 // Global toast helper
 function showToast(message, type = "secondary") {
   let container = document.getElementById("toast-container");

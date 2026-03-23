@@ -9,24 +9,30 @@
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <!-- Data source refresh buttons -->
     <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
-      <button type="button" class="btn btn-outline-secondary active" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
+      <button type="button" class="btn btn-outline-secondary active" id="btn-src-github" onclick="setSource('github')"
+        data-bs-toggle="tooltip" data-bs-title="Load cities from the GitHub data repo (last synced snapshot). Read-only — edits always go to the API.">
         <i class="bi bi-github me-1"></i>GitHub
       </button>
-      <button type="button" class="btn btn-outline-secondary" id="btn-src-gcs" onclick="setSource('gcs')" title="Load from GCS bucket">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-gcs" onclick="setSource('gcs')"
+        data-bs-toggle="tooltip" data-bs-title="Load cities from the GCS bucket (last synced snapshot). Used as a fallback if GitHub is unavailable.">
         <i class="bi bi-cloud me-1"></i>GCS
       </button>
-      <button type="button" class="btn btn-outline-secondary" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-api" onclick="setSource('api')"
+        data-bs-toggle="tooltip" data-bs-title="Load cities live from the backend API (BigQuery). Always up-to-date. Required for edits and deletes.">
         <i class="bi bi-database me-1"></i>API
       </button>
     </div>
     <!-- Sync button -->
-    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()" title="Dump cities + snapshots to GCS and GitHub">
+    <button class="btn btn-sm btn-outline-success" id="btn-sync" onclick="runSync()"
+      data-bs-toggle="tooltip" data-bs-title="Export all cities and snapshots from BigQuery to GCS and GitHub. Run this after making changes so the static sources stay up-to-date.">
       <i class="bi bi-arrow-repeat me-1"></i>Sync to GCS
     </button>
     <!-- Add city button -->
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#cityModal" onclick="openCreateModal()">
-      <i class="bi bi-plus-lg me-1"></i>Add City
-    </button>
+    <span data-bs-toggle="tooltip" data-bs-title="Add a new city to track. It will be included in the next scheduled Polymarket data fetch.">
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#cityModal" onclick="openCreateModal()">
+        <i class="bi bi-plus-lg me-1"></i>Add City
+      </button>
+    </span>
   </div>
 </div>
 
@@ -262,6 +268,13 @@
     }
   }
 
+  function initTooltips() {
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+      bootstrap.Tooltip.getInstance(el)?.dispose();
+      new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+    });
+  }
+
   function renderCities(cities) {
     document.getElementById('cities-tbody').innerHTML = cities.map(c => `
       <tr>
@@ -277,15 +290,18 @@
         <td class="text-muted small">${escHtml(c.added_date)}</td>
         <td class="text-muted small">${escHtml(c.notes || '—')}</td>
         <td class="text-end pe-3">
-          <button class="btn btn-sm btn-outline-secondary me-1" onclick='openEditModal(${JSON.stringify(c)})'>
+          <button class="btn btn-sm btn-outline-secondary me-1" onclick='openEditModal(${JSON.stringify(c)})'
+            data-bs-toggle="tooltip" data-bs-title="Edit this city's display name, timezone, active status, or notes.">
             <i class="bi bi-pencil"></i>
           </button>
-          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal('${escHtml(c.city)}', '${escHtml(c.source)}')">
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal('${escHtml(c.city)}', '${escHtml(c.source)}')"
+            data-bs-toggle="tooltip" data-bs-title="Remove this city from tracking. Historical snapshots are kept in BigQuery.">
             <i class="bi bi-trash3"></i>
           </button>
         </td>
       </tr>
     `).join('');
+    initTooltips();
   }
 
   function openCreateModal() {
