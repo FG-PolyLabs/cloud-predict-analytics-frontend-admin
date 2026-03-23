@@ -9,13 +9,13 @@
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <!-- Data source refresh buttons -->
     <div class="btn-group btn-group-sm" role="group" aria-label="Refresh from source">
-      <button type="button" class="btn btn-outline-secondary" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
+      <button type="button" class="btn btn-outline-secondary active" id="btn-src-github" onclick="setSource('github')" title="Load from GitHub data repo">
         <i class="bi bi-github me-1"></i>GitHub
       </button>
       <button type="button" class="btn btn-outline-secondary" id="btn-src-gcs" onclick="setSource('gcs')" title="Load from GCS bucket">
         <i class="bi bi-cloud me-1"></i>GCS
       </button>
-      <button type="button" class="btn btn-outline-secondary active" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
+      <button type="button" class="btn btn-outline-secondary" id="btn-src-api" onclick="setSource('api')" title="Load from backend API">
         <i class="bi bi-database me-1"></i>API
       </button>
     </div>
@@ -133,7 +133,8 @@
   const cityModal   = new bootstrap.Modal(document.getElementById('cityModal'));
   const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
 
-  let currentSource = 'api';
+  // 'auto' = cascade github → gcs → api; explicit = user locked a source
+  let currentSource = 'auto';
 
   firebase.auth().onAuthStateChanged(async user => {
     if (!user) {
@@ -159,30 +160,59 @@
 
     try {
       let cities;
-      if (currentSource === 'github') {
-        const raw = await loadFromGitHub('data/tracked_cities.jsonl');
-        cities = raw.map(normalizeCity);
-      } else if (currentSource === 'gcs') {
-        const raw = await loadFromGCS('data/tracked_cities.jsonl');
-        cities = raw.map(normalizeCity);
-      } else {
+      let resolvedSource = currentSource;
+
+      if (currentSource === 'auto' || currentSource === 'github' || currentSource === 'gcs') {
+        const tryOrder = currentSource === 'auto' ? ['github', 'gcs'] :
+                         currentSource === 'github' ? ['github'] : ['gcs'];
+
+        let raw = null;
+        for (const src of tryOrder) {
+          try {
+            raw = src === 'github'
+              ? await loadFromGitHub('data/tracked_cities.jsonl')
+              : await loadFromGCS('data/tracked_cities.jsonl');
+            resolvedSource = src;
+            break;
+          } catch (e) {
+            if (currentSource !== 'auto') throw e;
+          }
+        }
+
+        if (raw !== null) {
+          if (currentSource === 'auto') {
+            ['github', 'gcs', 'api'].forEach(s =>
+              document.getElementById(`btn-src-${s}`).classList.toggle('active', s === resolvedSource));
+          }
+          cities = raw.map(normalizeCity);
+        } else {
+          // All static sources failed — fall back to API
+          resolvedSource = 'api';
+          if (currentSource === 'auto') {
+            ['github', 'gcs', 'api'].forEach(s =>
+              document.getElementById(`btn-src-${s}`).classList.toggle('active', s === 'api'));
+          }
+        }
+      }
+
+      if (resolvedSource === 'api') {
         const sourceFilter = document.getElementById('source-filter').value;
         const query = sourceFilter ? `?source=${encodeURIComponent(sourceFilter)}` : '';
         cities = await api('GET', '/tracked-cities' + query);
-      }
 
-      // Populate source filter from API on first load
-      if (document.getElementById('source-filter').options.length === 1 && currentSource === 'api') {
-        const all = await api('GET', '/tracked-cities');
-        const sources = [...new Set(all.map(c => c.source))].sort();
-        const sel = document.getElementById('source-filter');
-        sources.forEach(s => {
-          const opt = document.createElement('option');
-          opt.value = s;
-          opt.textContent = s;
-          sel.appendChild(opt);
-        });
-        if (!document.getElementById('source-filter').value) cities = all;
+        // Populate source filter dropdown on first API load
+        if (document.getElementById('source-filter').options.length === 1) {
+          const all = cities.length ? cities : await api('GET', '/tracked-cities');
+          const sources = [...new Set(all.map(c => c.source))].sort();
+          const sel = document.getElementById('source-filter');
+          sources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            sel.appendChild(opt);
+          });
+          if (!sourceFilter) cities = all;
+        }
       }
 
       document.getElementById('loading').classList.add('d-none');
@@ -194,7 +224,7 @@
       document.getElementById('cities-card').classList.remove('d-none');
     } catch (e) {
       document.getElementById('loading').classList.add('d-none');
-      showToast('Failed to load cities from ' + currentSource + ': ' + e.message, 'danger');
+      showToast('Failed to load cities: ' + e.message, 'danger');
     }
   }
 
