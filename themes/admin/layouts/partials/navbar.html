@@ -31,7 +31,15 @@
         </li>
       </ul>
 
-      <div class="d-flex align-items-center gap-2 ms-auto" id="nav-auth">
+      <div class="d-flex align-items-center gap-2 ms-auto">
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+          data-bs-toggle="offcanvas" data-bs-target="#resources-panel"
+          title="Project resources">
+          <i class="bi bi-diagram-3"></i>
+        </button>
+      </div>
+
+      <div class="d-flex align-items-center gap-2" id="nav-auth">
         <span class="text-secondary small" id="nav-user-email"></span>
         <button class="btn btn-sm btn-outline-light d-none" id="btn-logout" onclick="authSignOut()">
           Sign out
@@ -43,3 +51,115 @@
     </div>
   </div>
 </nav>
+
+<!-- Resources Offcanvas Panel -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="resources-panel" aria-labelledby="resources-panel-label" style="width:360px">
+  <div class="offcanvas-header border-bottom">
+    <h5 class="offcanvas-title fw-semibold" id="resources-panel-label">
+      <i class="bi bi-diagram-3 me-2"></i>Project Resources
+    </h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body p-0">
+
+    <!-- GitHub -->
+    <div class="px-3 pt-3 pb-1">
+      <p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.06em">
+        <i class="bi bi-github me-1"></i>GitHub
+      </p>
+    </div>
+    <div class="list-group list-group-flush border-bottom mb-2">
+      <a href="https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">frontend-admin</div>
+        <div class="text-muted" style="font-size:.8rem">Admin UI — authenticated CRUD, charts, backfill controls. Deploys to GitHub Pages.</div>
+      </a>
+      <a href="https://github.com/FG-PolyLabs/cloud-predict-analytics"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">cloud-predict-analytics</div>
+        <div class="text-muted" style="font-size:.8rem">Backend — Cloud Run API (<code>weather-api</code>), Polymarket fetcher job, and BQ→GCS/GitHub sync job.</div>
+      </a>
+      <a href="https://github.com/FG-PolyLabs/cloud-predict-analytics-data"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">cloud-predict-analytics-data</div>
+        <div class="text-muted" style="font-size:.8rem">Static JSONL data files written by <code>weather-sync</code>. Also hosts the public (non-admin) frontend.</div>
+      </a>
+    </div>
+
+    <!-- Cloud Run -->
+    <div class="px-3 pt-2 pb-1">
+      <p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.06em">
+        <i class="bi bi-play-circle me-1"></i>Cloud Run
+      </p>
+    </div>
+    <div class="list-group list-group-flush border-bottom mb-2">
+      <a href="https://console.cloud.google.com/run/detail/us-central1/weather-api/overview?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">weather-api</div>
+          <span class="badge bg-primary-subtle text-primary border border-primary-subtle" style="font-size:.7rem">Service</span>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Authenticated REST API. All mutations (cities CRUD, backfill trigger, sync, reset) go through here.</div>
+      </a>
+      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-polymarket/overview?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">weather-polymarket</div>
+          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Fetches Polymarket price history and writes snapshots to BigQuery. Runs daily at 01:00 UTC; also triggered by backfill and reset.</div>
+      </a>
+      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-sync/overview?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">weather-sync</div>
+          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Exports <code>tracked_cities</code> and <code>polymarket_snapshots</code> from BigQuery to GCS and GitHub. Runs daily at 03:00 UTC.</div>
+      </a>
+    </div>
+
+    <!-- Cloud Scheduler -->
+    <div class="px-3 pt-2 pb-1">
+      <p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.06em">
+        <i class="bi bi-clock me-1"></i>Cloud Scheduler
+      </p>
+    </div>
+    <div class="list-group list-group-flush border-bottom mb-2">
+      <a href="https://console.cloud.google.com/cloudscheduler?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">Scheduled Jobs</div>
+        <div class="text-muted" style="font-size:.8rem"><code>weather-polymarket</code> at 01:00 UTC and <code>weather-sync</code> at 03:00 UTC daily.</div>
+      </a>
+    </div>
+
+    <!-- GCS -->
+    <div class="px-3 pt-2 pb-1">
+      <p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.06em">
+        <i class="bi bi-cloud me-1"></i>Cloud Storage
+      </p>
+    </div>
+    <div class="list-group list-group-flush border-bottom mb-2">
+      <a href="https://console.cloud.google.com/storage/browser/fg-polylabs-weather-data?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">fg-polylabs-weather-data</div>
+        <div class="text-muted" style="font-size:.8rem">GCS bucket holding exported JSONL files. Acts as a fast static fallback for the admin UI when GitHub is unavailable.</div>
+      </a>
+    </div>
+
+    <!-- BigQuery -->
+    <div class="px-3 pt-2 pb-1">
+      <p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.06em">
+        <i class="bi bi-database me-1"></i>BigQuery
+      </p>
+    </div>
+    <div class="list-group list-group-flush pb-3">
+      <a href="https://console.cloud.google.com/bigquery?project=fg-polylabs&ws=!1m4!1m3!3m2!1sfg-polylabs!2sweather"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="fw-medium small">fg-polylabs · weather</div>
+        <div class="text-muted" style="font-size:.8rem">Source of truth. Contains <code>tracked_cities</code> and <code>polymarket_snapshots</code>. All API reads and writes go here.</div>
+      </a>
+    </div>
+
+  </div>
+</div>
