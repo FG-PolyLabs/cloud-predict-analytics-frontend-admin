@@ -169,4 +169,12 @@ When asking Claude Code to validate the application, say:
 
 > "Run the daily health check"
 
-Claude will follow the steps in this document in order, flagging any failures and their likely cause.
+Claude will execute `scripts/health-check.sh`, which automates all six steps above and prints a `[PASS]` / `[FAIL]` / `[WARN]` result for each check, followed by a summary. Any failures are reported with detail so the triage guide above can be applied immediately.
+
+## Running the script manually
+
+```bash
+bash scripts/health-check.sh
+```
+
+Requires `gcloud` to be authenticated (`gcloud auth login`) and pointed at the `fg-polylabs` project. The BigQuery step is skipped automatically if the `bq` CLI is unavailable.
