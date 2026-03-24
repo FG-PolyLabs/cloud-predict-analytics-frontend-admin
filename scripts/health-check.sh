@@ -178,29 +178,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: BigQuery row count for yesterday
+# Step 5: BigQuery — most recent market date in polymarket_snapshots
+# Uses the BigQuery REST API directly (avoids bq CLI Python dependency issues).
+# Note: `timestamp` in this table is the market event date, not ingestion time.
+# We check that the most recent market date is within the last 14 days.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[ Step 5 ] BigQuery — yesterday's data ($YESTERDAY)"
+echo "[ Step 5 ] BigQuery — polymarket_snapshots freshness"
 
-if ! command -v bq &>/dev/null; then
-  check "BigQuery row count" skip "bq CLI not available"
+BQ_TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
+if [[ -z "$BQ_TOKEN" ]]; then
+  check "BigQuery market date" warn "could not obtain gcloud access token"
 else
-  bq_out=$(bq query \
-    --project_id="$PROJECT" \
-    --use_legacy_sql=false \
-    --format=csv \
-    "SELECT COUNT(*) as row_count FROM \`$PROJECT.weather.snapshots\` WHERE DATE(timestamp) = '$YESTERDAY'" \
+  bq_response=$(curl -s \
+    -H "Authorization: Bearer $BQ_TOKEN" \
+    -H "Content-Type: application/json" \
+    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries" \
+    -d "{\"query\":\"SELECT MAX(date) as max_date, COUNT(*) as total_rows FROM \\\`$PROJECT.weather.polymarket_snapshots\\\`\",\"useLegacySql\":false,\"timeoutMs\":10000}" \
     2>/dev/null || true)
 
-  if [[ -z "$bq_out" ]]; then
-    check "BigQuery row count" warn "query failed or returned no output (check bq CLI)"
+  bq_error=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['error']['message'])" 2>/dev/null || true)
+  if [[ -n "$bq_error" ]]; then
+    check "BigQuery market date" fail "query error: $bq_error"
   else
-    row_count=$(echo "$bq_out" | tail -1 | tr -d '[:space:]')
-    if [[ "$row_count" =~ ^[0-9]+$ ]] && [[ "$row_count" -gt 0 ]]; then
-      check "BigQuery row count" pass "$row_count rows for $YESTERDAY"
+    max_date=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['rows'][0]['f'][0]['v'])" 2>/dev/null || true)
+    total=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['rows'][0]['f'][1]['v'])" 2>/dev/null || true)
+
+    if [[ -z "$max_date" || "$max_date" == "None" ]]; then
+      check "BigQuery market date" fail "no rows in polymarket_snapshots"
     else
-      check "BigQuery row count" fail "0 rows found for $YESTERDAY"
+      # Warn if most recent market date is older than 14 days
+      max_epoch=$(date -u -d "$max_date" +%s 2>/dev/null || date -u -j -f "%Y-%m-%d" "$max_date" +%s 2>/dev/null || echo 0)
+      today_epoch=$(date -u +%s)
+      days_old=$(( (today_epoch - max_epoch) / 86400 ))
+      if [[ "$days_old" -le 14 ]]; then
+        check "BigQuery market date" pass "most recent market date $max_date (${days_old}d ago), $total total rows"
+      else
+        check "BigQuery market date" warn "most recent market date $max_date (${days_old}d ago) — no active markets beyond this date?"
+      fi
     fi
   fi
 fi

@@ -88,21 +88,18 @@ Look for any ERROR-level lines. A healthy run logs per-city fetch progress and a
 
 ### 3c. Verify data landed in BigQuery
 
-Run this query in the BigQuery console to confirm rows exist for yesterday:
+Run this query in the BigQuery console to confirm data is present and recent:
 
 ```sql
 SELECT
-  DATE(timestamp) AS date,
-  COUNT(*) AS row_count
-FROM `fg-polylabs.weather.snapshots`
-WHERE DATE(timestamp) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-GROUP BY 1
-ORDER BY 1 DESC;
+  MAX(date) AS most_recent_market_date,
+  COUNT(*) AS total_rows
+FROM `fg-polylabs.weather.polymarket_snapshots`;
 ```
 
 > Open BigQuery: https://console.cloud.google.com/bigquery?project=fg-polylabs
 
-Expected: at least one row per tracked city. If the result is empty, check the polymarket job logs (Step 3b).
+Expected: `most_recent_market_date` within the last ~14 days. Note: the `date` column is the Polymarket market event date (not ingestion time), so it reflects the furthest-out open market, not today's date. If the result is empty or very stale (>14 days), check the polymarket job logs (Step 3b).
 
 ---
 
@@ -157,7 +154,7 @@ Expected: `200`. Any 5xx means the service is down.
 |---------|-------------|-------------|
 | GCS/GitHub files stale, sync job succeeded | Sync job ran but push step errored silently | Check sync job logs for push/upload errors |
 | Sync job failed | Upstream BigQuery data missing (doomsday-polymarket didn't run) | Check doomsday-polymarket job first (Step 3) |
-| doomsday-polymarket succeeded but BQ has no rows | Query error or wrong date filter | Broaden date range in BQ query |
+| doomsday-polymarket succeeded but BQ market date is stale | No new Polymarket markets listed beyond that date | Normal if markets haven't been opened; check Polymarket for new listings |
 | weather-api 5xx | Bad deploy or OOM | Check Logs tab on the service revision |
 | All jobs fine but admin UI shows stale data | Browser cache or source locked to GitHub | Click "GCS" source button or hard-refresh |
 
