@@ -18,7 +18,7 @@ FutureGadgetLabs/
 | Repo | GitHub | Role |
 |------|--------|------|
 | `cloud-predict-analytics-frontend-admin` | https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin | Admin-only UI; authenticated CRUD via backend API; reads JSONL from data repo or GCS |
-| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Three parts: (1) Cloud Run API service (`weather-api`) for all mutations; (2) Cloud Run job (`weather-polymarket`) that fetches Polymarket data daily; (3) Cloud Run job (`weather-sync`) that exports BigQuery → GCS + GitHub |
+| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Three parts: (1) Cloud Run API service (`weather-api`) for all mutations; (2) Cloud Run job (`doomsday-polymarket`) that fetches Polymarket data daily; (3) Cloud Run job (`weather-sync`) that exports BigQuery → GCS + GitHub |
 | `cloud-predict-analytics-data` | https://github.com/FG-PolyLabs/cloud-predict-analytics-data | JSONL data files written by `weather-sync`; also hosts the public (non-admin) frontend |
 
 ### First-Time Setup
@@ -48,10 +48,10 @@ bash scripts/setup.sh
 |----------|---------|
 | GCP Project | `fg-polylabs` |
 | Cloud Run API | `weather-api` — `us-central1` |
-| Cloud Run Job | `weather-polymarket` — `us-central1`, runs daily at 01:00 UTC |
+| Cloud Run Job | `doomsday-polymarket` — `us-central1`, runs daily at 01:00 UTC |
 | Cloud Run Job | `weather-sync` — `us-central1`, runs daily at 03:00 UTC; exports BQ → GCS + GitHub |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
-| GCS Bucket | `fg-polylabs-weather-data` in `fg-polylabs` |
+| GCS Bucket | `fg-polylabs-weather-data` in `fg-polylabs`; data files under `data/` prefix |
 | Firebase Project | `collection-showcase-auth` |
 
 ### Key Files
