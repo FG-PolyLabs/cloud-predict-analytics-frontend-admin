@@ -225,10 +225,12 @@
       document.getElementById('auth-guard').classList.remove('d-none');
       return;
     }
-    // Default date range: today
-    const today = new Date().toISOString().slice(0, 10);
-    document.getElementById('filter-date-from').value = today;
-    document.getElementById('filter-date-to').value = today;
+    // Default date range: yesterday → today
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    document.getElementById('filter-date-from').value = yesterday.toISOString().slice(0, 10);
+    document.getElementById('filter-date-to').value = today.toISOString().slice(0, 10);
     await populateCityFilter();
   });
 

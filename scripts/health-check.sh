@@ -131,13 +131,16 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 4: doomsday-polymarket Cloud Run job
+# Step 4: weather-polymarket Cloud Run job
 # ---------------------------------------------------------------------------
 echo ""
-echo "[ Step 4 ] doomsday-polymarket Cloud Run job"
+echo "[ Step 4 ] weather-polymarket Cloud Run job"
+
+poly_job_ok=false
+poly_no_markets=false
 
 poly_exec=$(gcloud run jobs executions list \
-  --job=doomsday-polymarket \
+  --job=weather-polymarket \
   --region="$REGION" \
   --project="$PROJECT" \
   --limit=1 \
@@ -145,7 +148,7 @@ poly_exec=$(gcloud run jobs executions list \
   2>/dev/null || true)
 
 if [[ -z "$poly_exec" ]]; then
-  check "doomsday-polymarket execution" fail "no executions found"
+  check "weather-polymarket execution" fail "no executions found"
 else
   exec_name=$(echo "$poly_exec" | awk '{print $1}')
   comp_time=$(echo "$poly_exec" | awk '{print $2}')
@@ -153,68 +156,84 @@ else
   status=$(echo "$poly_exec" | awk '{print $4}')
   comp_date=$(echo "$comp_time" | cut -c1-10)
 
-  if [[ "$condition" == "Completed" && "$status" == "True" && "$comp_date" == "$TODAY" ]]; then
-    check "doomsday-polymarket execution" pass "Completed at $comp_time"
-  elif [[ "$condition" == "Completed" && "$status" == "True" ]]; then
-    check "doomsday-polymarket execution" fail "Completed but on $comp_date, not today"
-  else
-    check "doomsday-polymarket execution" fail "status=$condition/$status at $comp_time"
-  fi
-
-  # Check for errors in logs
+  # Fetch error logs first — used to classify the failure type below.
   errors=$(gcloud logging read \
-    "resource.type=cloud_run_job AND resource.labels.job_name=doomsday-polymarket AND resource.labels.execution_name=$exec_name AND severity>=ERROR" \
+    "resource.type=cloud_run_job AND resource.labels.job_name=weather-polymarket AND resource.labels.execution_name=$exec_name AND severity>=ERROR" \
     --project="$PROJECT" \
     --limit=5 \
     --format="value(textPayload)" \
     2>/dev/null || true)
 
-  if [[ -z "$errors" ]]; then
-    check "doomsday-polymarket logs" pass "no ERROR-level entries"
+  # Detect "no markets found" — job ran correctly but Polymarket had no listings yet.
+  if [[ -n "$errors" ]] && echo "$errors" | grep -qi "no markets found\|could not find event"; then
+    poly_no_markets=true
+  fi
+
+  if [[ "$condition" == "Completed" && "$status" == "True" && "$comp_date" == "$TODAY" ]]; then
+    check "weather-polymarket execution" pass "Completed at $comp_time"
+    poly_job_ok=true
+  elif [[ "$condition" == "Completed" && "$status" == "True" ]]; then
+    check "weather-polymarket execution" fail "Completed but on $comp_date, not today"
+  elif [[ "$poly_no_markets" == "true" ]]; then
+    check "weather-polymarket execution" warn "exited non-zero: no Polymarket markets found for target date (listings may not have opened yet)"
   else
-    check "doomsday-polymarket logs" fail "errors found:"
+    check "weather-polymarket execution" fail "status=$condition/$status at $comp_time"
+  fi
+
+  if [[ -z "$errors" ]]; then
+    check "weather-polymarket logs" pass "no ERROR-level entries"
+  elif [[ "$poly_no_markets" == "true" ]]; then
+    check "weather-polymarket logs" warn "no markets found on Polymarket — listings may not have opened yet"
+  else
+    check "weather-polymarket logs" fail "errors found:"
     echo "$errors" | sed 's/^/      /'
   fi
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: BigQuery — most recent market date in polymarket_snapshots
-# Uses the BigQuery REST API directly (avoids bq CLI Python dependency issues).
-# Note: `timestamp` in this table is the market event date, not ingestion time.
-# We check that the most recent market date is within the last 14 days.
+# Step 5: BigQuery — polymarket_snapshots table metadata
+# Uses tables.get REST API to check lastModifiedTime and numRows.
+# No query execution needed — avoids quota and async polling.
 # ---------------------------------------------------------------------------
 echo ""
 echo "[ Step 5 ] BigQuery — polymarket_snapshots freshness"
 
 BQ_TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
 if [[ -z "$BQ_TOKEN" ]]; then
-  check "BigQuery market date" warn "could not obtain gcloud access token"
+  check "BigQuery table metadata" warn "could not obtain gcloud access token"
 else
   bq_response=$(curl -s \
     -H "Authorization: Bearer $BQ_TOKEN" \
-    -H "Content-Type: application/json" \
-    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries" \
-    -d "{\"query\":\"SELECT MAX(date) as max_date, COUNT(*) as total_rows FROM \\\`$PROJECT.weather.polymarket_snapshots\\\`\",\"useLegacySql\":false,\"timeoutMs\":10000}" \
+    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/datasets/weather/tables/polymarket_snapshots" \
     2>/dev/null || true)
 
   bq_error=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['error']['message'])" 2>/dev/null || true)
   if [[ -n "$bq_error" ]]; then
-    check "BigQuery market date" fail "query error: $bq_error"
+    check "BigQuery table metadata" fail "API error: $bq_error"
   else
-    max_date=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['rows'][0]['f'][0]['v'])" 2>/dev/null || true)
-    total=$(echo "$bq_response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['rows'][0]['f'][1]['v'])" 2>/dev/null || true)
+    result=$(echo "$bq_response" | python3 -c "
+import sys, json
+from datetime import datetime, timezone
+r = json.load(sys.stdin)
+ts = int(r['lastModifiedTime']) / 1000
+mod = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d')
+rows = r.get('numRows', '?')
+print(mod, rows)
+" 2>/dev/null || true)
 
-    if [[ -z "$max_date" || "$max_date" == "None" ]]; then
-      check "BigQuery market date" fail "no rows in polymarket_snapshots"
+    if [[ -z "$result" ]]; then
+      check "BigQuery table metadata" fail "could not parse API response"
     else
-      # Warn if most recent market date is older than 14 days
-      max_epoch=$(date -u -d "$max_date" +%s 2>/dev/null || date -u -j -f "%Y-%m-%d" "$max_date" +%s 2>/dev/null || echo 0)
-      today_epoch=$(date -u +%s)
-      days_old=$(( (today_epoch - max_epoch) / 86400 ))
-      if [[ "$days_old" -le 14 ]]; then
-        check "BigQuery market date" pass "most recent market date $max_date (${days_old}d ago), $total total rows"
+      mod_date=$(echo "$result" | awk '{print $1}')
+      num_rows=$(echo "$result" | awk '{print $2}')
+      if [[ "$mod_date" == "$TODAY" ]]; then
+        check "BigQuery table metadata" pass "last modified today ($mod_date), $num_rows rows"
+      elif [[ "$poly_no_markets" == "true" ]]; then
+        check "BigQuery table metadata" warn "last modified $mod_date, $num_rows rows — polymarket found no markets for target date, table not touched"
+      elif [[ "$poly_job_ok" == "false" ]]; then
+        check "BigQuery table metadata" warn "last modified $mod_date, $num_rows rows — weather-polymarket also failed, staleness is expected"
       else
-        check "BigQuery market date" warn "most recent market date $max_date (${days_old}d ago) — no active markets beyond this date?"
+        check "BigQuery table metadata" fail "last modified $mod_date (expected $TODAY), $num_rows rows"
       fi
     fi
   fi

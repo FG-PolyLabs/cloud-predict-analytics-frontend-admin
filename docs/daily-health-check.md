@@ -8,7 +8,7 @@ Use this checklist to verify that all scheduled jobs ran successfully and the se
 
 | Job | Schedule (UTC) | What it does |
 |-----|---------------|--------------|
-| `doomsday-polymarket` | 01:00 | Fetches Polymarket data → lands in BigQuery |
+| `weather-polymarket` | 01:00 | Fetches Polymarket data → lands in BigQuery |
 | `weather-sync` | 03:00 | Exports BigQuery → GCS + GitHub |
 | `weather-api` | always-on | REST API service; no schedule |
 
@@ -70,12 +70,12 @@ Filter by severity **ERROR** or **WARNING**. A healthy run should end with log l
 
 ---
 
-## Step 3 — Check doomsday-polymarket Cloud Run job
+## Step 3 — Check weather-polymarket Cloud Run job
 
 ### 3a. Confirm last execution succeeded
 
 ```
-https://console.cloud.google.com/run/jobs/details/us-central1/doomsday-polymarket/executions?project=fg-polylabs
+https://console.cloud.google.com/run/jobs/details/us-central1/weather-polymarket/executions?project=fg-polylabs
 ```
 
 The most recent execution should show status **Succeeded** and a start time of today ~01:00 UTC.
@@ -100,6 +100,20 @@ FROM `fg-polylabs.weather.polymarket_snapshots`;
 > Open BigQuery: https://console.cloud.google.com/bigquery?project=fg-polylabs
 
 Expected: `most_recent_market_date` within the last ~14 days. Note: the `date` column is the Polymarket market event date (not ingestion time), so it reflects the furthest-out open market, not today's date. If the result is empty or very stale (>14 days), check the polymarket job logs (Step 3b).
+
+### 3d. Per-city snapshot coverage (data-report.py)
+
+After `weather-sync` runs, use `data-report.py` to verify all cities have data for a specific date:
+
+```bash
+# Per-city row counts for a specific market date
+python3 scripts/data-report.py 2026-03-27
+
+# Most recent snapshot date per city (useful for spotting gaps)
+python3 scripts/data-report.py --latest
+```
+
+Expected: all 12 active cities present with non-zero snapshot counts. Any city showing 0 rows or missing entirely warrants checking the polymarket job logs for that city.
 
 ---
 
@@ -139,9 +153,10 @@ Expected: `200`. Any 5xx means the service is down.
 [ ] 1d. tracked_cities.jsonl in GCS updated today
 [ ] 2a. weather-sync last execution = Succeeded
 [ ] 2b. weather-sync logs have no ERRORs
-[ ] 3a. doomsday-polymarket last execution = Succeeded
-[ ] 3b. doomsday-polymarket logs have no ERRORs
+[ ] 3a. weather-polymarket last execution = Succeeded
+[ ] 3b. weather-polymarket logs have no ERRORs
 [ ] 3c. BigQuery has rows for yesterday
+[ ] 3d. data-report.py shows all 12 cities with snapshots for yesterday
 [ ] 4a. weather-api metrics look healthy
 [ ] 4b. weather-api smoke test returns 200
 ```
@@ -153,8 +168,9 @@ Expected: `200`. Any 5xx means the service is down.
 | Symptom | Likely cause | First action |
 |---------|-------------|-------------|
 | GCS/GitHub files stale, sync job succeeded | Sync job ran but push step errored silently | Check sync job logs for push/upload errors |
-| Sync job failed | Upstream BigQuery data missing (doomsday-polymarket didn't run) | Check doomsday-polymarket job first (Step 3) |
-| doomsday-polymarket succeeded but BQ market date is stale | No new Polymarket markets listed beyond that date | Normal if markets haven't been opened; check Polymarket for new listings |
+| Sync job failed | Upstream BigQuery data missing (weather-polymarket didn't run) | Check weather-polymarket job first (Step 3) |
+| weather-polymarket exits non-zero, logs say "no markets found" | Polymarket hasn't listed markets for that date yet | Normal — no action needed; check Polymarket for new listings when expected |
+| weather-polymarket succeeded but BQ market date is stale | No new Polymarket markets listed beyond that date | Normal if markets haven't been opened; check Polymarket for new listings |
 | weather-api 5xx | Bad deploy or OOM | Check Logs tab on the service revision |
 | All jobs fine but admin UI shows stale data | Browser cache or source locked to GitHub | Click "GCS" source button or hard-refresh |
 
