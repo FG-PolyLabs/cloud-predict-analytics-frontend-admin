@@ -3,104 +3,147 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-28 (session 2)
-
----
-
-## Blocked / Action Required
-
-- [x] **weather-polymarket job was running the wrong binary — no data collected since job creation** *(fixed 2026-03-27)*
-  - Root cause: the Cloud Run job had no `--command` override, so it ran the image's default
-    ENTRYPOINT (`./api`, the web server) instead of `./polymarket`. The API server ignored
-    `--all-cities --yesterday` and sat idle for 90 min until task timeout on every daily run.
-  - Fix: set `--command=/app/polymarket` on the live job via `gcloud run jobs update`, and
-    added `--command=/app/polymarket --args="--all-cities,--yesterday"` to both `build.yml`
-    and `scripts/setup.sh` so future deploys/provisioning preserve it.
-  - Validated: manual run on 2026-03-28 collected **6,726 snapshots across 12/12 cities**
-    for market date 2026-03-27. BQ table at 80,807 total rows.
-
-- [x] **Job name mismatch: `health-check.sh` monitored the wrong Cloud Run job** *(fixed 2026-03-27)*
-  - Was: `health-check.sh` queried `weather-polymarket`; actual deployed job is `weather-polymarket`.
-  - Fixed: renamed all references in `health-check.sh`, `CLAUDE.md`, and `docs/daily-health-check.md`
-    to `weather-polymarket` (matching `build.yml` and `setup.sh`).
-  - Also fixed: BQ staleness check (Step 5) now downgrades from FAIL → WARN when the
-    polymarket job itself also failed, so correlated failures don't double-count.
+Last updated: 2026-03-28 (session 3)
 
 ---
 
 ## Pick Up Here (session interrupted 2026-03-28)
 
-- [x] **Run `weather-polymarket` job and validate per-city data for yesterday (2026-03-27)**
-  - User restarted to fix gcloud/bq CLI install. Resume by:
-    1. `gcloud run jobs execute weather-polymarket --region=us-central1 --project=fg-polylabs --wait`
-    2. Query BQ per-city row counts for `date = '2026-03-27'` using `bq` CLI (REST API had
-       escaping issues on Windows — use `bq query` instead)
-    3. Run `bash scripts/health-check.sh` — expect all green except weather-sync Steps 1-3
-       if sync hasn't run yet today (runs at 03:00 UTC)
-    4. Pull the data repo and run `python3 scripts/data-report.py 2026-03-27` once sync runs
-  - Context: BQ table confirmed at 80,807 rows, last modified 2026-03-28 02:32 UTC from an
-    earlier manual run (execution `weather-polymarket-hwft7`). If re-running, the MERGE will
-    skip duplicates and report 0 new rows — that's expected if we already ran it today.
-  - Use `bq query` not REST API for per-city breakdowns — REST API date literals had shell
-    escaping issues on Windows.
+### 1. Create weather-nbm Cloud Run job (manual step — not yet done)
+
+The `weather-nbm` binary is built and deployed to the image via `build.yml`,
+but the Cloud Run Job itself hasn't been created yet. Run once:
+
+```bash
+gcloud run jobs create weather-nbm \
+  --image=us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket:latest \
+  --command=/app/nbm \
+  --args="--all-cities,--forecast-days=10" \
+  --region=us-central1 \
+  --service-account=weather-runner@fg-polylabs.iam.gserviceaccount.com \
+  --task-timeout=10m \
+  --max-retries=2 \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=fg-polylabs" \
+  --project=fg-polylabs
+```
+
+Then schedule it daily at 00:30 UTC via Cloud Scheduler:
+
+```bash
+gcloud scheduler jobs create http weather-nbm-daily \
+  --schedule="30 0 * * *" \
+  --uri="https://cloudrun.googleapis.com/v2/projects/fg-polylabs/locations/us-central1/jobs/weather-nbm:run" \
+  --message-body="{}" \
+  --oauth-service-account-email=weather-runner@fg-polylabs.iam.gserviceaccount.com \
+  --location=us-central1 \
+  --project=fg-polylabs
+```
+
+### 2. Run the first nbm job manually and validate
+
+```bash
+gcloud run jobs execute weather-nbm --region=us-central1 --project=fg-polylabs --wait
+```
+
+Then query BQ to confirm data landed:
+
+```sql
+SELECT city, target_date, forecast_date, lead_days,
+       predicted_max_temp_c, temp_std_dev_c, member_count
+FROM weather.nbm_forecasts
+ORDER BY city, target_date, forecast_date
+LIMIT 50;
+```
+
+Expected: 12 cities × 10 days = 120 rows, all with `member_count=30`.
+
+### 3. Verify the Mar 10-26 polymarket backfill finished
+
+Execution `weather-polymarket-8npsj` was running when session ended (~20:15 UTC).
+Check status:
+
+```bash
+gcloud run jobs executions describe weather-polymarket-8npsj \
+  --region=us-central1 --project=fg-polylabs \
+  --format="value(status.conditions[0].type, status.conditions[0].status, status.completionTime)"
+```
+
+If `Completed/False`, check logs for partial failures (missing cities on some dates is normal).
+Then run:
+
+```bash
+python3 scripts/data-report.py --latest
+```
+
+Expected: all 12 cities showing recent data. Then trigger weather-sync to push to GCS/GitHub.
+
+---
+
+## Blocked / Action Required
+
+- [x] **weather-polymarket job was running the wrong binary** *(fixed 2026-03-27)*
+- [x] **Job name mismatch in health-check.sh** *(fixed 2026-03-27)*
+- [x] **temp_threshold=0 for all range markets (e.g. "between 68-69°F")** *(fixed 2026-03-28)*
+  - Root cause: `extractTempThreshold` called `ParseFloat("68-69")` which fails → returned 0.
+  - Fix: `strings.LastIndex(token, "-")` strips the lower bound, leaving just the upper ("69").
+  - Also fixed: `--no-volume` now bypasses Filter 1 (VolumeTotal==0) so resolved markets
+    can be backfilled via the CLOB price history API.
+  - Also fixed: `runAllCities` returns error instead of `log.Fatalf`, so date-range backfill
+    continues past dates where some cities have no Polymarket event.
+  - Backfill: Feb 3–Mar 9 complete. Mar 10–26 backfill (`weather-polymarket-8npsj`) was in
+    progress when session ended. 29,456 bad threshold=0 rows were deleted before re-collection.
 
 ---
 
 ## Next Up
 
-- [x] **Verify health-check.sh BQ step handles the "job ran but no new markets" case gracefully** *(fixed 2026-03-28)*
-  - Step 4 now greps logs for "no markets found" / "could not find event" before reporting status.
-    If detected: execution and log checks downgrade from FAIL → WARN with a clear message.
-  - Step 5 BQ check has a new `poly_no_markets` branch that WARNs with "polymarket found no
-    markets for target date, table not touched" — distinct from the generic "also failed" WARN.
+- [ ] **Add actual temperature to nbm_forecasts (accuracy tracking)**
+  - Once the nbm job is running and collecting forecasts, add a second daily job (or extend
+    the nbm job) to backfill `actual_max_temp_c` for past target_dates.
+  - Source: Iowa State Mesonet API (ASOS) — use nearest airport to each city.
+  - City → airport mapping needed (e.g. dallas → KDFW, nyc → KJFK, london → EGLL).
+  - Derived fields: `error_c = predicted - actual`, `abs_error_c`.
+  - This enables the core analysis: does forecast std_dev correlate with Polymarket spread?
 
-- [x] **Add `data-report.py` to the daily health check runbook** *(done 2026-03-28)*
-  - Added Step 3d to `docs/daily-health-check.md` with usage examples for `--date` and `--latest`.
-  - Added checklist item `3d` and a triage row for the "no markets found" case.
+- [ ] **Add weather-nbm to health-check.sh**
+  - Add a Step 7 checking the `weather-nbm` Cloud Run job last execution and BQ row count.
+
+- [ ] **Verify health-check.sh BQ step handles "job ran but no new markets" gracefully**
+  *(already done 2026-03-28 — keeping for reference)*
+
+- [ ] **Alert on data staleness**
+  - When no new snapshots land for N consecutive days, surface a warning in the admin UI.
 
 ---
 
 ## Backlog
 
 - [ ] **Auto-discover new Polymarket markets for tracked cities**
-  - Discovery source: https://polymarket.com/weather/temperature — find cities listed there
-    that are not yet in our `tracked_cities` table and surface them for review/addition.
-  - This could be a periodic check in `weather-polymarket` or a separate lightweight job.
-  - Should log newly found cities rather than auto-add them (human review before tracking).
+  - Discovery source: https://polymarket.com/weather/temperature
+  - Should log newly found cities rather than auto-add (human review before tracking).
 
-- [ ] **NBM temperature prediction pipeline — new BQ table**
-  - Fetch live National Blend of Models (NBM) forecast data and store it in a new BigQuery
-    table (dataset `weather`, e.g. `nbm_forecasts`).
-  - Schema goal: capture the NBM predicted temperature at specific forecast hours (e.g.
-    predicted high at noon) per city per date, including the forecast issuance time so we
-    can track how predictions evolve as the target date approaches.
-  - Accuracy tracking (same table or a derived table):
-    - `predicted_temp`: what NBM said the temp would be at noon on date D
-    - `actual_temp`: what was actually recorded (source: nearest airport ASOS/METAR data)
-    - Derived fields: error, absolute error, which enables std-dev analysis across cities
-      and forecast lead times
-  - Airport data source: use ASOS/METAR airport observations for actuals (NOAA ISD or
-    Iowa State Mesonet API are good sources; match each tracked city to its nearest airport)
-  - Downstream use: feed into analysis of Polymarket pricing vs. NBM forecast accuracy —
-    does the market price correlate with forecast uncertainty (wide std-dev = more spread)?
-
-- [ ] **Alert on data staleness**
-  - When no new snapshots land for N consecutive days, surface a warning somewhere (email,
-    Slack, or just a visible flag in the admin UI on the snapshots page).
+- [ ] **Admin UI: NBM forecast tab**
+  - Add a tab to the snapshots page (or a new section) showing `nbm_forecasts` data:
+    - Chart: predicted_max_temp_c over lead_days for a given city/target_date
+    - Overlay: temp_std_dev_c as a shaded band
+    - Overlay: actual Polymarket YES% for the winning threshold bracket
+  - Data source: new `/nbm-forecasts` API endpoint in weather-api.
 
 ---
 
-## Recently Completed
+## Recently Completed (2026-03-28)
 
-- [x] `scripts/data-report.py` — per-city snapshot coverage report, supports `--date` and
-      `--latest` (2026-03-27)
-- [x] `scripts/health-check.sh` — automated daily health check for all six system components
-      (GCS, GitHub, both Cloud Run jobs, BigQuery, weather-api) (2026-03-25 ish)
-- [x] `docs/daily-health-check.md` — runbook for manual and scripted health checks
-- [x] Collapsible resources panel in navbar
-- [x] Reset Table button on snapshots page
-- [x] Backfill modal on snapshots page
-- [x] Chart/table toggle + date range filter on snapshots page
-- [x] Source cascade (GitHub → GCS → API) with manual source lock buttons
+- [x] Polymarket threshold extraction fix (`extractTempThreshold` handles "X-Y°F" ranges)
+- [x] Backfill filter fix (`--no-volume` bypasses VolumeTotal==0 check for resolved markets)
+- [x] Backfill continuity fix (`runAllCities` returns error instead of Fatalf in date-range mode)
+- [x] `weather-nbm` job implemented (`cmd/nbm/main.go`) — GFS ensemble → BQ `nbm_forecasts`
+  - 30-member GFS ensemble via Open-Meteo, computes mean + sample std dev per day
+  - MERGE key: (city, target_date, forecast_date); updates on re-run
+  - Table auto-created on first run; day-partitioned on target_date
+- [x] Snapshots page default date range: yesterday → today
+- [x] health-check.sh: "no markets found" failures now WARN not FAIL
+- [x] daily-health-check.md: Step 3d added for data-report.py
+- [x] `scripts/data-report.py` — per-city snapshot coverage report (2026-03-27)
+- [x] `scripts/health-check.sh` — daily health check script
 - [x] `weather-sync` job — daily BQ → GCS + GitHub export
 - [x] `weather-polymarket` job — daily Polymarket fetch → BigQuery
