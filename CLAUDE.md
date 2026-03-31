@@ -71,6 +71,7 @@ bash scripts/setup.sh
 | `content/debug/_index.md` | Debug section |
 | `themes/admin/layouts/tracked-cities/list.html` | Cities CRUD — list, add, edit, delete; source cascade + sync |
 | `themes/admin/layouts/snapshots/list.html` | Snapshots — Chart.js line chart + table toggle; date range; backfill modal |
+| `themes/admin/layouts/nbm-forecasts/list.html` | NBM forecasts — line chart with ±1σ/p10–p90 bands; inline ensemble distribution chart (1°C bins, threshold query); table view |
 | `themes/admin/layouts/debug/list.html` | Debug page — config, auth state, connectivity checks, token viewer |
 | `.env.example` | Template for all environment variables |
 | `scripts/setup.sh` | Clones sibling repos if not already present |

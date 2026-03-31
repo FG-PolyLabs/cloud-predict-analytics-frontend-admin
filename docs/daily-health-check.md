@@ -8,6 +8,7 @@ Use this checklist to verify that all scheduled jobs ran successfully and the se
 
 | Job | Schedule (UTC) | What it does |
 |-----|---------------|--------------|
+| `weather-nbm` | 00:30 | Fetches GFS ensemble forecasts → lands in BigQuery (`nbm_forecasts`) |
 | `weather-polymarket` | 01:00 | Fetches Polymarket data → lands in BigQuery |
 | `weather-sync` | 03:00 | Exports BigQuery → GCS + GitHub |
 | `weather-api` | always-on | REST API service; no schedule |
@@ -117,6 +118,33 @@ Expected: all 12 active cities present with non-zero snapshot counts. Any city s
 
 ---
 
+## Step 5 — Check weather-nbm Cloud Run job
+
+### 5a. Confirm last execution succeeded
+
+```
+https://console.cloud.google.com/run/jobs/details/us-central1/weather-nbm/executions?project=fg-polylabs
+```
+
+The most recent execution should show status **Succeeded** and a start time of today ~00:30 UTC.
+
+### 5b. Review logs for errors
+
+Click the most recent execution → **Logs** tab. Filter by severity **ERROR**. A healthy run logs per-city fetch progress and a final count of rows inserted/updated.
+
+### 5c. Verify data landed in BigQuery
+
+```sql
+SELECT
+  MAX(forecast_date) AS most_recent_forecast_date,
+  COUNT(*) AS total_rows
+FROM `fg-polylabs.weather.nbm_forecasts`;
+```
+
+Expected: `most_recent_forecast_date` = today. If stale, check the nbm job logs (Step 5b).
+
+---
+
 ## Step 4 — Verify weather-api service is live
 
 ### 4a. Metrics / health
@@ -159,6 +187,9 @@ Expected: `200`. Any 5xx means the service is down.
 [ ] 3d. data-report.py shows all 12 cities with snapshots for yesterday
 [ ] 4a. weather-api metrics look healthy
 [ ] 4b. weather-api smoke test returns 200
+[ ] 5a. weather-nbm last execution = Succeeded
+[ ] 5b. weather-nbm logs have no ERRORs
+[ ] 5c. BigQuery nbm_forecasts has rows for today's forecast_date
 ```
 
 ---
@@ -171,6 +202,8 @@ Expected: `200`. Any 5xx means the service is down.
 | Sync job failed | Upstream BigQuery data missing (weather-polymarket didn't run) | Check weather-polymarket job first (Step 3) |
 | weather-polymarket exits non-zero, logs say "no markets found" | Polymarket hasn't listed markets for that date yet | Normal — no action needed; check Polymarket for new listings when expected |
 | weather-polymarket succeeded but BQ market date is stale | No new Polymarket markets listed beyond that date | Normal if markets haven't been opened; check Polymarket for new listings |
+| weather-nbm failed | Open-Meteo API down or city coords missing | Check nbm job logs; verify city is in `cityCoords` map |
+| nbm_forecasts stale but job succeeded | `member_temps` column missing (schema migration silently failed) | Add column manually via BQ REST API; see TODO ensureColumns bug |
 | weather-api 5xx | Bad deploy or OOM | Check Logs tab on the service revision |
 | All jobs fine but admin UI shows stale data | Browser cache or source locked to GitHub | Click "GCS" source button or hard-refresh |
 
@@ -182,7 +215,7 @@ When asking Claude Code to validate the application, say:
 
 > "Run the daily health check"
 
-Claude will execute `scripts/health-check.sh`, which automates all six steps above and prints a `[PASS]` / `[FAIL]` / `[WARN]` result for each check, followed by a summary. Any failures are reported with detail so the triage guide above can be applied immediately.
+Claude will execute `scripts/health-check.sh`, which automates all seven steps above and prints a `[PASS]` / `[FAIL]` / `[WARN]` result for each check, followed by a summary. Any failures are reported with detail so the triage guide above can be applied immediately.
 
 ## Running the script manually
 
