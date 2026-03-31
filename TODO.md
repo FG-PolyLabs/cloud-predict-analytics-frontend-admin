@@ -57,14 +57,16 @@ Last updated: 2026-03-30 (session 6, end-of-session notes added)
      - **Edge** — difference between NBM probability and Polymarket YES price (positive = model says more likely than market implies)
   4. Table sortable by edge; chart option: grouped bars per target_date (NBM% vs Polymarket YES%).
 
-  **Data sourcing — frontend vs backend:**
-  - NBM data: served by `weather-api /nbm-forecasts`. For a future public app, either add a
-    public (no-auth) variant of this endpoint, or include `nbm_forecasts` in the `weather-sync`
-    GCS/GitHub export so the public app can read it without the API.
-  - Polymarket data: Polymarket exposes a public REST API — markets can be fetched directly
-    from browser JS with no backend or auth required. No need to go through `weather-api`.
-  - **Decision:** admin tab can use `weather-api` (auth already present). Standalone public app
-    should use GCS-exported NBM data + direct Polymarket API calls — zero backend dependency.
+  **Data sourcing:**
+  - Access-controlled: restricted to authorized emails via Firebase Auth (same whitelist as
+    admin site). Not public — no GCS/GitHub export needed.
+  - NBM data: fetched from `weather-api /nbm-forecasts` with Firebase ID token (same `api()`
+    helper pattern as admin). No new public endpoint or GCS export required.
+  - Polymarket data: Polymarket exposes a public REST API — fetch directly from browser JS,
+    no backend proxy needed.
+  - **Decision:** both admin tab and future standalone app hit `weather-api` directly with auth.
+    Standalone app = new repo (e.g. `cloud-predict-analytics-frontend`) with its own Firebase
+    Auth setup but same `ALLOWED_EMAILS` whitelist and same API.
 
   **Bracket alignment:**
   - Polymarket markets are defined per temperature bracket (e.g. "Will Miami high be 24–25°F?").
