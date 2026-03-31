@@ -79,10 +79,38 @@
             <th>Actual</th>
             <th>Error</th>
             <th class="text-muted">Members</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="nbm-tbody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- Probability Distribution Modal -->
+<div class="modal fade" id="dist-modal" tabindex="-1" aria-labelledby="dist-modal-label" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dist-modal-label">Temperature Probability Distribution</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" id="dist-modal-subtitle"></p>
+        <canvas id="dist-chart" style="max-height:300px"></canvas>
+        <div class="mt-3 p-3 bg-light rounded" id="threshold-panel">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="small fw-medium">P(high ≥</span>
+            <input type="number" id="threshold-input" class="form-control form-control-sm"
+                   step="0.5" style="width:90px" placeholder="°C">
+            <span class="small fw-medium">°C) =</span>
+            <span id="threshold-result" class="fw-bold fs-6">—</span>
+            <span class="text-muted small" id="threshold-count"></span>
+          </div>
+        </div>
+        <p class="text-muted small mt-2 mb-0" id="dist-modal-note"></p>
+      </div>
     </div>
   </div>
 </div>
@@ -93,8 +121,138 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
   let nbmChart = null;
+  let distChart = null;
   let lastRows = [];
   let chartMode = true;
+
+  // Empirical 1-degree bins from raw member temps.
+  // Returns array of { lo, count, pct } for bins with ≥1 member (pct always shown).
+  function computeEmpiricalBins(members) {
+    const n = members.length;
+    if (n === 0) return [];
+    const lo0 = Math.floor(Math.min(...members));
+    const hi0 = Math.floor(Math.max(...members));
+    const bins = [];
+    for (let lo = lo0; lo <= hi0; lo++) {
+      const count = members.filter(t => t >= lo && t < lo + 1).length;
+      if (count > 0) bins.push({ lo, count, pct: (count / n) * 100 });
+    }
+    return bins;
+  }
+
+  // Fallback normal CDF (Abramowitz & Stegun) for rows without member_temps.
+  function normalCDF(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x));
+    const d = 0.3989422820 * Math.exp(-x * x / 2);
+    const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+    return x >= 0 ? 1 - p : p;
+  }
+  function computeNormalBins(mean, stddev) {
+    if (!stddev || stddev <= 0) return [];
+    const bins = [];
+    const start = Math.floor(mean - 4 * stddev);
+    const end   = Math.ceil(mean + 4 * stddev);
+    for (let lo = start; lo <= end; lo++) {
+      const pct = (normalCDF((lo + 1 - mean) / stddev) - normalCDF((lo - mean) / stddev)) * 100;
+      if (pct >= 1) bins.push({ lo, count: null, pct });
+    }
+    return bins;
+  }
+
+  // P(high >= threshold) from raw members; returns null if members unavailable.
+  function empiricalExceedance(members, threshold) {
+    if (!members || members.length === 0) return null;
+    const count = members.filter(t => t >= threshold).length;
+    return { count, n: members.length, pct: (count / members.length) * 100 };
+  }
+
+  let _distMembers = null; // members for the currently open modal
+
+  function showDistribution(row) {
+    const members = row.member_temps && row.member_temps.length > 0 ? row.member_temps : null;
+    const bins = members ? computeEmpiricalBins(members) : computeNormalBins(row.predicted_max_temp_c, row.temp_std_dev_c);
+    _distMembers = members;
+
+    document.getElementById('dist-modal-label').textContent =
+      `${row.city} — ${row.target_date} (lead ${row.lead_days}d)`;
+    document.getElementById('dist-modal-subtitle').textContent =
+      `μ = ${row.predicted_max_temp_c.toFixed(2)}°C  σ = ${row.temp_std_dev_c.toFixed(2)}°C` +
+      (members ? `  p10 = ${row.p10_temp_c.toFixed(1)}°C  p90 = ${row.p90_temp_c.toFixed(1)}°C` : '');
+    document.getElementById('dist-modal-note').textContent = members
+      ? `Based on ${members.length} raw GFS ensemble members. Each bar = exact member count in that 1°C bin.`
+      : `No raw member data for this row — showing normal distribution approximation from μ/σ.`;
+
+    // Seed threshold input with the mean
+    const threshInput = document.getElementById('threshold-input');
+    threshInput.value = row.predicted_max_temp_c.toFixed(1);
+    updateThreshold();
+
+    if (distChart) distChart.destroy();
+    distChart = new Chart(document.getElementById('dist-chart'), {
+      type: 'bar',
+      data: {
+        labels: bins.map(b => `${b.lo}–${b.lo + 1}°C`),
+        datasets: [{
+          label: 'Probability (%)',
+          data: bins.map(b => parseFloat(b.pct.toFixed(2))),
+          backgroundColor: bins.map(b =>
+            (b.lo <= row.predicted_max_temp_c && row.predicted_max_temp_c < b.lo + 1)
+              ? 'rgba(13,110,253,0.85)'
+              : 'rgba(13,110,253,0.35)'
+          ),
+          borderColor: 'rgba(13,110,253,0.9)',
+          borderWidth: 1,
+          borderRadius: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const b = bins[ctx.dataIndex];
+                const totalMembers = _distMembers ? _distMembers.length : null;
+                return b.count != null && totalMembers
+                  ? `${b.count}/${totalMembers} members — ${ctx.parsed.y.toFixed(1)}%`
+                  : `${ctx.parsed.y.toFixed(2)}%`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { title: { display: true, text: 'Max Temperature (°C)' } },
+          y: {
+            title: { display: true, text: 'Probability (%)' },
+            ticks: { callback: v => v + '%' },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+
+    new bootstrap.Modal(document.getElementById('dist-modal')).show();
+  }
+
+  function updateThreshold() {
+    const val = parseFloat(document.getElementById('threshold-input').value);
+    const resultEl = document.getElementById('threshold-result');
+    const countEl  = document.getElementById('threshold-count');
+    if (isNaN(val)) { resultEl.textContent = '—'; countEl.textContent = ''; return; }
+    if (_distMembers) {
+      const r = empiricalExceedance(_distMembers, val);
+      resultEl.textContent = r.pct.toFixed(1) + '%';
+      countEl.textContent  = `(${r.count} of ${r.n} members)`;
+    } else {
+      resultEl.textContent = '—';
+      countEl.textContent  = 'no member data';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('threshold-input').addEventListener('input', updateThreshold);
+  });
 
   const CITY_COLORS = [
     '#0d6efd','#dc3545','#198754','#fd7e14','#6f42c1',
@@ -317,7 +475,8 @@
   }
 
   function renderTable(rows) {
-    document.getElementById('nbm-tbody').innerHTML = rows.map(r => {
+    const tbody = document.getElementById('nbm-tbody');
+    tbody.innerHTML = rows.map((r, idx) => {
       const skewClass = r.skewness > 0.5 ? 'text-danger' : r.skewness < -0.5 ? 'text-primary' : 'text-muted';
       const skewIcon  = r.skewness > 0.5 ? '↑' : r.skewness < -0.5 ? '↓' : '';
       const errorCell = r.error_c != null
@@ -336,9 +495,14 @@
           <td>${r.actual_max_temp_c != null ? r.actual_max_temp_c.toFixed(1) + '°C' : '<span class="text-muted">—</span>'}</td>
           <td>${errorCell}</td>
           <td class="text-muted text-center">${r.member_count}</td>
+          <td><button class="btn btn-outline-secondary btn-sm py-0 px-2 dist-btn" data-idx="${idx}" title="Show probability distribution">~</button></td>
         </tr>
       `;
     }).join('');
+
+    tbody.querySelectorAll('.dist-btn').forEach(btn => {
+      btn.addEventListener('click', () => showDistribution(lastRows[+btn.dataset.idx]));
+    });
   }
 
   function escHtml(str) {

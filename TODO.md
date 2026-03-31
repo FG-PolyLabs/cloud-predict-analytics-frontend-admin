@@ -3,113 +3,22 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-28 (session 3)
-
----
-
-## Pick Up Here (session interrupted 2026-03-28)
-
-### 1. Create weather-nbm Cloud Run job (manual step — not yet done)
-
-The `weather-nbm` binary is built and deployed to the image via `build.yml`,
-but the Cloud Run Job itself hasn't been created yet. Run once:
-
-```bash
-gcloud run jobs create weather-nbm \
-  --image=us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket:latest \
-  --command=/app/nbm \
-  --args="--all-cities,--forecast-days=10" \
-  --region=us-central1 \
-  --service-account=weather-runner@fg-polylabs.iam.gserviceaccount.com \
-  --task-timeout=10m \
-  --max-retries=2 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=fg-polylabs" \
-  --project=fg-polylabs
-```
-
-Then schedule it daily at 00:30 UTC via Cloud Scheduler:
-
-```bash
-gcloud scheduler jobs create http weather-nbm-daily \
-  --schedule="30 0 * * *" \
-  --uri="https://cloudrun.googleapis.com/v2/projects/fg-polylabs/locations/us-central1/jobs/weather-nbm:run" \
-  --message-body="{}" \
-  --oauth-service-account-email=weather-runner@fg-polylabs.iam.gserviceaccount.com \
-  --location=us-central1 \
-  --project=fg-polylabs
-```
-
-### 2. Run the first nbm job manually and validate
-
-```bash
-gcloud run jobs execute weather-nbm --region=us-central1 --project=fg-polylabs --wait
-```
-
-Then query BQ to confirm data landed:
-
-```sql
-SELECT city, target_date, forecast_date, lead_days,
-       predicted_max_temp_c, temp_std_dev_c, member_count
-FROM weather.nbm_forecasts
-ORDER BY city, target_date, forecast_date
-LIMIT 50;
-```
-
-Expected: 12 cities × 10 days = 120 rows, all with `member_count=30`.
-
-### 3. Verify the Mar 10-26 polymarket backfill finished
-
-Execution `weather-polymarket-8npsj` was running when session ended (~20:15 UTC).
-Check status:
-
-```bash
-gcloud run jobs executions describe weather-polymarket-8npsj \
-  --region=us-central1 --project=fg-polylabs \
-  --format="value(status.conditions[0].type, status.conditions[0].status, status.completionTime)"
-```
-
-If `Completed/False`, check logs for partial failures (missing cities on some dates is normal).
-Then run:
-
-```bash
-python3 scripts/data-report.py --latest
-```
-
-Expected: all 12 cities showing recent data. Then trigger weather-sync to push to GCS/GitHub.
-
----
-
-## Blocked / Action Required
-
-- [x] **weather-polymarket job was running the wrong binary** *(fixed 2026-03-27)*
-- [x] **Job name mismatch in health-check.sh** *(fixed 2026-03-27)*
-- [x] **temp_threshold=0 for all range markets (e.g. "between 68-69°F")** *(fixed 2026-03-28)*
-  - Root cause: `extractTempThreshold` called `ParseFloat("68-69")` which fails → returned 0.
-  - Fix: `strings.LastIndex(token, "-")` strips the lower bound, leaving just the upper ("69").
-  - Also fixed: `--no-volume` now bypasses Filter 1 (VolumeTotal==0) so resolved markets
-    can be backfilled via the CLOB price history API.
-  - Also fixed: `runAllCities` returns error instead of `log.Fatalf`, so date-range backfill
-    continues past dates where some cities have no Polymarket event.
-  - Backfill: Feb 3–Mar 9 complete. Mar 10–26 backfill (`weather-polymarket-8npsj`) was in
-    progress when session ended. 29,456 bad threshold=0 rows were deleted before re-collection.
+Last updated: 2026-03-30 (session 6)
 
 ---
 
 ## Next Up
 
-- [ ] **Add actual temperature to nbm_forecasts (accuracy tracking)**
-  - Once the nbm job is running and collecting forecasts, add a second daily job (or extend
-    the nbm job) to backfill `actual_max_temp_c` for past target_dates.
-  - Source: Iowa State Mesonet API (ASOS) — use nearest airport to each city.
-  - City → airport mapping needed (e.g. dallas → KDFW, nyc → KJFK, london → EGLL).
-  - Derived fields: `error_c = predicted - actual`, `abs_error_c`.
-  - This enables the core analysis: does forecast std_dev correlate with Polymarket spread?
+- [x] **Backfill actual_max_temp_c for past target_dates** ✓ 2026-03-30
+  - Added `--backfill-actuals` flag to `cmd/nbm/main.go`.
+  - Source: Open-Meteo archive API (same coordinates as forecasts, UTC daily max — no airport mapping needed).
+  - Queries BQ for `(city, target_date)` pairs with NULL actuals where `target_date < TODAY`,
+    fetches via archive, merges back with `error_c = predicted - actual`.
+  - Cloud Run job updated: `--all-cities,--forecast-days=10,--backfill-actuals`.
+  - Dates not yet in archive (e.g. yesterday) are silently skipped and retried next run.
 
 - [ ] **Add weather-nbm to health-check.sh**
   - Add a Step 7 checking the `weather-nbm` Cloud Run job last execution and BQ row count.
-
-- [ ] **Verify health-check.sh BQ step handles "job ran but no new markets" gracefully**
-  *(already done 2026-03-28 — keeping for reference)*
 
 - [ ] **Alert on data staleness**
   - When no new snapshots land for N consecutive days, surface a warning in the admin UI.
@@ -118,20 +27,71 @@ Expected: all 12 cities showing recent data. Then trigger weather-sync to push t
 
 ## Backlog
 
+- [x] **NBM bin probabilities: store raw member temps** ✓ 2026-03-30
+  - Added `member_temps REPEATED FLOAT64` to `nbm_forecasts` schema.
+  - `cmd/nbm/main.go` stores raw 30-member values; `ensureColumns()` auto-migrates existing table.
+  - API returns `member_temps` array; frontend uses empirical distribution (count/30 per bin).
+  - Modal now shows exact member counts in tooltips + threshold query: "P(high ≥ X°C) = N/30 members".
+
+
+
+- [ ] **Investigate weather-polymarket job failure**
+  - Daily Polymarket fetch job failed (noted 2026-03-29). Check Cloud Run logs,
+    determine if it's a transient error or a code/data issue, and fix.
+
+- [ ] **NBM page: forecast evolution chart (multi-line by forecast_date)**
+  - Currently the page filters to a single forecast_date (default today), so there's one
+    line per city. The desired view: one line per forecast_date for a selected city, showing
+    how the 10-day prediction evolves as each new daily forecast comes in.
+  - Requires:
+    1. API: change /nbm-forecasts to accept forecast_date_from/forecast_date_to range
+       instead of a single forecast_date (or add a separate mode).
+    2. Frontend: require city selection (multi-line by city doesn't make sense here);
+       group chart datasets by forecast_date; x-axis = target_date; each line = one
+       forecast_date's predictions. Std dev / p10-p90 bands per line optional.
+  - Good to build once a few days of data have accumulated (currently only 2026-03-29).
+
+- [ ] **Admin UI: Overlay Polymarket YES% on NBM chart**
+  - Once the evolution chart is built, overlay actual Polymarket YES% for the matching
+    threshold bracket so you can visually compare forecast uncertainty vs market pricing.
+
 - [ ] **Auto-discover new Polymarket markets for tracked cities**
   - Discovery source: https://polymarket.com/weather/temperature
   - Should log newly found cities rather than auto-add (human review before tracking).
 
-- [ ] **Admin UI: NBM forecast tab**
-  - Add a tab to the snapshots page (or a new section) showing `nbm_forecasts` data:
-    - Chart: predicted_max_temp_c over lead_days for a given city/target_date
-    - Overlay: temp_std_dev_c as a shaded band
-    - Overlay: actual Polymarket YES% for the winning threshold bracket
-  - Data source: new `/nbm-forecasts` API endpoint in weather-api.
+---
+
+## Recently Completed (2026-03-30, session 6)
+
+- [x] **Backfill actual_max_temp_c / error_c** — `--backfill-actuals` flag added to `cmd/nbm/main.go`
+  - Open-Meteo archive API; same coords as forecasts; no airport mapping
+  - MERGE updates all forecast_date rows for a (city, target_date) in one pass
+  - Cloud Run job + build.yml updated to pass `--backfill-actuals` daily
+
+## Recently Completed (2026-03-30, session 5)
+
+- [x] **NBM page: 1-degree bin probability distribution modal**
+  - "~" button on each table row opens a modal bar chart showing probability per 1-degree bin.
+  - Computed entirely on the frontend from `predicted_max_temp_c` (μ) and `temp_std_dev_c` (σ)
+    using the normal CDF (Abramowitz & Stegun approximation). No new table or API changes needed.
+  - Bins with <1% probability omitted. Bin containing μ highlighted in darker blue.
+  - Label format: "15–16°C → X.XX%"
+
+## Recently Completed (2026-03-29)
+
+- [x] `weather-nbm` Cloud Run job created and scheduled (daily 00:30 UTC)
+- [x] CI pipeline fixed: GITHUB_TOKEN removed from update-env-vars (already in Secret Manager)
+- [x] nbm_forecasts schema extended: skewness, p10_temp_c, p90_temp_c, actual_max_temp_c, error_c
+  - skewness: third standardized moment (>0 = hot tail, <0 = cold tail)
+  - p10/p90: 10th/90th percentile across 30 GFS ensemble members
+  - actual_max_temp_c / error_c: nullable, filled retrospectively once date passes
+- [x] MERGE fixed: switched from INSERT ROW (positional) to explicit named INSERT
+  - Root cause: INSERT ROW is positional; ALTER TABLE appended new cols at end of target
+    while nbmSchema() placed them in the middle — caused type mismatch on member_count
 
 ---
 
-## Recently Completed (2026-03-28)
+## Previously Completed (2026-03-28)
 
 - [x] Polymarket threshold extraction fix (`extractTempThreshold` handles "X-Y°F" ranges)
 - [x] Backfill filter fix (`--no-volume` bypasses VolumeTotal==0 check for resolved markets)
