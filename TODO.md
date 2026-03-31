@@ -3,11 +3,50 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-30 (session 6, end-of-session notes added)
+Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
 
 ---
 
 ## Next Up
+
+- [ ] **[IN PROGRESS] Build `cloud-predict-analytics-market-edge` repo** — resume session 7
+  - Repo path: `../cloud-predict-analytics-market-edge/` (sibling dir, not yet git-init'd)
+  - Repo name: `cloud-predict-analytics-market-edge`
+  - Purpose: auth-gated (Firebase + ALLOWED_EMAILS) NBM vs Polymarket comparison UI.
+    Pick a city → fetch NBM from weather-api + Polymarket markets from Gamma API → show
+    bracket-by-bracket comparison table (YES%, NBM%, edge) + grouped bar chart.
+  - **Files already created** (scaffold is done):
+    - `hugo.toml`, `.env.example`, `.gitignore`
+    - `.github/workflows/deploy.yml`
+    - `content/_index.md`
+    - `static/css/app.css`, `static/js/firebase-init.js`, `static/js/api.js`, `static/js/app.js`
+    - `themes/edge/layouts/_default/baseof.html`
+    - `themes/edge/layouts/partials/head.html`, `navbar.html`, `footer.html`, `scripts.html`
+  - **Still needed** (pick up here):
+    1. `themes/edge/layouts/index.html` — the main comparison page (most of the work):
+       - Auth guard + sign-in prompt
+       - Controls: city selector (hardcoded CITIES list), forecast date input, Load button
+       - Fetches NBM: `api('GET', '/nbm-forecasts' + qs({ city, forecast_date }))`
+       - Fetches Polymarket per target_date: `GET https://gamma-api.polymarket.com/events?slug={slug}`
+         Slug format: `highest-temperature-in-{city}-on-{month}-{day}-{year}` (e.g. `highest-temperature-in-miami-on-april-4-2026`)
+         Current YES price: `market.outcomePrices[0]` (string "0.75" → multiply × 100 for %)
+       - Bracket parsing (JS): handle "X-Y°C", "X-Y°F" (convert to °C), "above X°C/F", "below X°C/F"
+         For "above X°C": NBM prob = members >= X / total
+         For "X-Y°C": NBM prob = members in [lo, hi) / total
+       - Table per target_date: Bracket | Polymarket YES% | NBM% | Edge | Members/30
+         Edge color: green (>+5%) = YES value, red (<-5%) = NO value, gray = neutral
+       - Chart: date selector → grouped bar chart (Chart.js), brackets on X-axis,
+         Polymarket YES% (orange) and NBM% (blue) as two bar series
+       - Dates with no Polymarket market: show NBM row with "No market" in Polymarket column
+    2. `CLAUDE.md` for the new repo (project instructions)
+    3. `git init` + initial commit + push to new GitHub repo `FG-PolyLabs/cloud-predict-analytics-market-edge`
+    4. Set up GitHub Pages + repo secrets/vars (same Firebase project as admin, same ALLOWED_EMAILS)
+  - **Key design notes from code review:**
+    - `extractTempThreshold` in Go takes upper bound of "X-Y°C" ranges (e.g. "24-25°C" → 25.0)
+    - Gamma API is CORS-enabled (public); if CORS fails in practice, add proxy endpoint to weather-api
+    - `OutcomePrices` field on GammaMarket = `["0.75", "0.25"]` (YES, NO as decimal strings)
+    - City slugs used in Polymarket match BQ city slugs directly ("nyc", "buenos-aires", etc.)
+    - Fetch all dates in parallel with `Promise.all` for speed
 
 - [x] **Backfill actual_max_temp_c for past target_dates** ✓ 2026-03-30
   - Added `--backfill-actuals` flag to `cmd/nbm/main.go`.
