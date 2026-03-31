@@ -3,7 +3,7 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-30 (session 6)
+Last updated: 2026-03-30 (session 6, end-of-session notes added)
 
 ---
 
@@ -17,8 +17,19 @@ Last updated: 2026-03-30 (session 6)
   - Cloud Run job updated: `--all-cities,--forecast-days=10,--backfill-actuals`.
   - Dates not yet in archive (e.g. yesterday) are silently skipped and retried next run.
 
-- [ ] **Add weather-nbm to health-check.sh**
-  - Add a Step 7 checking the `weather-nbm` Cloud Run job last execution and BQ row count.
+- [ ] **ensureColumns bug: member_temps not auto-migrated on first run**
+  - The `ensureColumns()` schema migration in `cmd/nbm/main.go` silently failed to add
+    `member_temps` — column had to be added manually via BQ REST API.
+  - Root cause unknown (possibly ETag conflict or BQ Go client issue). Investigate and fix
+    so future schema additions work automatically without manual intervention.
+
+- [ ] **Rebuild nbm.exe before running manually after code changes**
+  - Reminder: `go build -o nbm.exe ./cmd/nbm/` must be run after any code change.
+    The old binary was used inadvertently, producing rows with empty member_temps.
+  - Consider adding a note to CLAUDE.md or runbook about this.
+
+- [x] **Add weather-nbm to health-check.sh** ✓ 2026-03-30
+  - Added Step 7: checks `weather-nbm` last execution + error logs + `nbm_forecasts` BQ table metadata.
 
 - [ ] **Alert on data staleness**
   - When no new snapshots land for N consecutive days, surface a warning in the admin UI.

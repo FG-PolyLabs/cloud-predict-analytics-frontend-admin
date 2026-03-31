@@ -88,6 +88,29 @@
   </div>
 </div>
 
+<!-- Inline probability distribution card (single-city mode only) -->
+<div class="card shadow-sm border-0 d-none mb-3" id="dist-inline-card">
+  <div class="card-header bg-transparent border-bottom-0 pt-3 pb-1 d-flex align-items-center gap-3 flex-wrap">
+    <span class="fw-medium small">Ensemble Distribution</span>
+    <select class="form-select form-select-sm" id="dist-date-select" style="max-width:160px"></select>
+    <span class="text-muted small" id="dist-inline-subtitle"></span>
+  </div>
+  <div class="card-body">
+    <canvas id="dist-inline-chart" style="max-height:260px"></canvas>
+    <div class="mt-3 p-3 bg-light rounded">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="small fw-medium">P(high ≥</span>
+        <input type="number" id="inline-threshold-input" class="form-control form-control-sm"
+               step="0.5" style="width:90px" placeholder="°C">
+        <span class="small fw-medium">°C) =</span>
+        <span id="inline-threshold-result" class="fw-bold fs-6">—</span>
+        <span class="text-muted small" id="inline-threshold-count"></span>
+      </div>
+    </div>
+    <p class="text-muted small mt-2 mb-0" id="dist-inline-note"></p>
+  </div>
+</div>
+
 <!-- Probability Distribution Modal -->
 <div class="modal fade" id="dist-modal" tabindex="-1" aria-labelledby="dist-modal-label" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -122,8 +145,10 @@
 <script>
   let nbmChart = null;
   let distChart = null;
+  let distInlineChart = null;
   let lastRows = [];
   let chartMode = true;
+  let _inlineMembers = null;
 
   // Empirical 1-degree bins from raw member temps.
   // Returns array of { lo, count, pct } for bins with ≥1 member (pct always shown).
@@ -250,8 +275,92 @@
     }
   }
 
+  function renderInlineDist(row) {
+    if (!row) return;
+    const members = row.member_temps && row.member_temps.length > 0 ? row.member_temps : null;
+    const bins = members ? computeEmpiricalBins(members) : computeNormalBins(row.predicted_max_temp_c, row.temp_std_dev_c);
+    _inlineMembers = members;
+
+    document.getElementById('dist-inline-subtitle').textContent =
+      `μ = ${row.predicted_max_temp_c.toFixed(2)}°C  σ = ${row.temp_std_dev_c.toFixed(2)}°C` +
+      (members ? `  p10 = ${row.p10_temp_c.toFixed(1)}°C  p90 = ${row.p90_temp_c.toFixed(1)}°C` : '');
+    document.getElementById('dist-inline-note').textContent = members
+      ? `Based on ${members.length} raw GFS ensemble members. Each bar = exact member count in that 1°C bin.`
+      : `No raw member data — showing normal distribution approximation from μ/σ.`;
+
+    const threshInput = document.getElementById('inline-threshold-input');
+    threshInput.value = row.predicted_max_temp_c.toFixed(1);
+    updateInlineThreshold();
+
+    if (distInlineChart) distInlineChart.destroy();
+    distInlineChart = new Chart(document.getElementById('dist-inline-chart'), {
+      type: 'bar',
+      data: {
+        labels: bins.map(b => `${b.lo}–${b.lo + 1}°C`),
+        datasets: [{
+          label: 'Probability (%)',
+          data: bins.map(b => parseFloat(b.pct.toFixed(2))),
+          backgroundColor: bins.map(b =>
+            (b.lo <= row.predicted_max_temp_c && row.predicted_max_temp_c < b.lo + 1)
+              ? 'rgba(13,110,253,0.85)'
+              : 'rgba(13,110,253,0.35)'
+          ),
+          borderColor: 'rgba(13,110,253,0.9)',
+          borderWidth: 1,
+          borderRadius: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const b = bins[ctx.dataIndex];
+                return b.count != null && _inlineMembers
+                  ? `${b.count}/${_inlineMembers.length} members — ${ctx.parsed.y.toFixed(1)}%`
+                  : `${ctx.parsed.y.toFixed(2)}%`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { title: { display: true, text: 'Max Temperature (°C)' } },
+          y: {
+            title: { display: true, text: 'Probability (%)' },
+            ticks: { callback: v => v + '%' },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+  }
+
+  function updateInlineThreshold() {
+    const val = parseFloat(document.getElementById('inline-threshold-input').value);
+    const resultEl = document.getElementById('inline-threshold-result');
+    const countEl  = document.getElementById('inline-threshold-count');
+    if (isNaN(val)) { resultEl.textContent = '—'; countEl.textContent = ''; return; }
+    if (_inlineMembers) {
+      const r = empiricalExceedance(_inlineMembers, val);
+      resultEl.textContent = r.pct.toFixed(1) + '%';
+      countEl.textContent  = `(${r.count} of ${r.n} members)`;
+    } else {
+      resultEl.textContent = '—';
+      countEl.textContent  = 'no member data';
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('threshold-input').addEventListener('input', updateThreshold);
+    document.getElementById('inline-threshold-input').addEventListener('input', updateInlineThreshold);
+    document.getElementById('dist-date-select').addEventListener('change', () => {
+      const date = document.getElementById('dist-date-select').value;
+      const city = document.getElementById('filter-city').value;
+      const row = lastRows.find(r => r.target_date === date && (city ? r.city === city : true));
+      if (row) renderInlineDist(row);
+    });
   });
 
   const CITY_COLORS = [
@@ -306,6 +415,7 @@
     emptyEl.classList.add('d-none');
     chartCard.classList.add('d-none');
     tableCard.classList.add('d-none');
+    document.getElementById('dist-inline-card').classList.add('d-none');
 
     try {
       const params = {};
@@ -341,10 +451,18 @@
     const multiCity = cities.length > 1;
 
     const subtitle = document.getElementById('chart-subtitle');
+    const distInlineCard = document.getElementById('dist-inline-card');
     if (multiCity) {
       subtitle.textContent = 'Showing mean line only for multiple cities. Select a single city for full bands.';
+      distInlineCard.classList.add('d-none');
     } else {
       subtitle.textContent = '';
+      // Populate date selector and show inline distribution card
+      const cityRows = byCityMap[cities[0]].sort((a, b) => a.target_date < b.target_date ? -1 : 1);
+      const sel = document.getElementById('dist-date-select');
+      sel.innerHTML = cityRows.map(r => `<option value="${r.target_date}">${r.target_date} (lead ${r.lead_days}d)</option>`).join('');
+      distInlineCard.classList.remove('d-none');
+      renderInlineDist(cityRows[0]);
     }
 
     const datasets = [];
@@ -442,6 +560,22 @@
       options: {
         responsive: true,
         interaction: { mode: 'index', intersect: false },
+        onClick: (evt, elements) => {
+          if (!elements.length) return;
+          // Find the mean-line dataset point (not a band dataset)
+          const el = elements.find(e => {
+            const ds = datasets[e.datasetIndex];
+            return ds && !ds.label.startsWith('_') && ds.label !== 'p10–p90' && ds.label !== '±1σ' && ds.label !== 'Actual High' && !ds.label.includes('actual');
+          });
+          if (!el) return;
+          const targetDate = datasets[el.datasetIndex].data[el.index].x;
+          const city = document.getElementById('filter-city').value;
+          const row = lastRows.find(r => r.target_date === targetDate && (city ? r.city === city : true));
+          if (!row) return;
+          document.getElementById('dist-date-select').value = targetDate;
+          renderInlineDist(row);
+          document.getElementById('dist-inline-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        },
         plugins: {
           legend: {
             position: 'top',

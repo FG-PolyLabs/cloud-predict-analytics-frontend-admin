@@ -273,6 +273,94 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 7: weather-nbm Cloud Run job + nbm_forecasts freshness
+# ---------------------------------------------------------------------------
+echo ""
+echo "[ Step 7 ] weather-nbm Cloud Run job"
+
+nbm_exec=$(gcloud run jobs executions list \
+  --job=weather-nbm \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --limit=1 \
+  --format="value(name, status.completionTime, status.conditions[0].type, status.conditions[0].status)" \
+  2>/dev/null || true)
+
+nbm_job_ok=false
+
+if [[ -z "$nbm_exec" ]]; then
+  check "weather-nbm execution" fail "no executions found"
+else
+  exec_name=$(echo "$nbm_exec" | awk '{print $1}')
+  comp_time=$(echo "$nbm_exec" | awk '{print $2}')
+  condition=$(echo "$nbm_exec" | awk '{print $3}')
+  status=$(echo "$nbm_exec"   | awk '{print $4}')
+  comp_date=$(echo "$comp_time" | cut -c1-10)
+
+  if [[ "$condition" == "Completed" && "$status" == "True" && "$comp_date" == "$TODAY" ]]; then
+    check "weather-nbm execution" pass "Completed at $comp_time"
+    nbm_job_ok=true
+  elif [[ "$condition" == "Completed" && "$status" == "True" ]]; then
+    check "weather-nbm execution" fail "Completed but on $comp_date, not today"
+  else
+    check "weather-nbm execution" fail "status=$condition/$status at $comp_time"
+  fi
+
+  errors=$(gcloud logging read \
+    "resource.type=cloud_run_job AND resource.labels.job_name=weather-nbm AND resource.labels.execution_name=$exec_name AND severity>=ERROR" \
+    --project="$PROJECT" \
+    --limit=5 \
+    --format="value(textPayload)" \
+    2>/dev/null || true)
+
+  if [[ -z "$errors" ]]; then
+    check "weather-nbm logs" pass "no ERROR-level entries"
+  else
+    check "weather-nbm logs" fail "errors found:"
+    echo "$errors" | sed 's/^/      /'
+  fi
+fi
+
+# BigQuery — nbm_forecasts table metadata
+if [[ -z "$BQ_TOKEN" ]]; then
+  check "BigQuery nbm_forecasts metadata" warn "no gcloud token (skipped — see Step 5)"
+else
+  bq_nbm=$(curl -s \
+    -H "Authorization: Bearer $BQ_TOKEN" \
+    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/datasets/weather/tables/nbm_forecasts" \
+    2>/dev/null || true)
+
+  bq_nbm_error=$(echo "$bq_nbm" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['error']['message'])" 2>/dev/null || true)
+  if [[ -n "$bq_nbm_error" ]]; then
+    check "BigQuery nbm_forecasts metadata" fail "API error: $bq_nbm_error"
+  else
+    nbm_result=$(echo "$bq_nbm" | python3 -c "
+import sys, json
+from datetime import datetime, timezone
+r = json.load(sys.stdin)
+ts = int(r['lastModifiedTime']) / 1000
+mod = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d')
+rows = r.get('numRows', '?')
+print(mod, rows)
+" 2>/dev/null || true)
+
+    if [[ -z "$nbm_result" ]]; then
+      check "BigQuery nbm_forecasts metadata" fail "could not parse API response"
+    else
+      mod_date=$(echo "$nbm_result" | awk '{print $1}')
+      num_rows=$(echo "$nbm_result" | awk '{print $2}')
+      if [[ "$mod_date" == "$TODAY" ]]; then
+        check "BigQuery nbm_forecasts metadata" pass "last modified today ($mod_date), $num_rows rows"
+      elif [[ "$nbm_job_ok" == "false" ]]; then
+        check "BigQuery nbm_forecasts metadata" warn "last modified $mod_date, $num_rows rows — weather-nbm also failed, staleness is expected"
+      else
+        check "BigQuery nbm_forecasts metadata" fail "last modified $mod_date (expected $TODAY), $num_rows rows"
+      fi
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
