@@ -38,6 +38,115 @@ Last updated: 2026-03-30 (session 6, end-of-session notes added)
 
 ## Backlog
 
+---
+
+### Product 1 — NBM vs Polymarket comparison UI
+
+**Goal:** A decision-support tool. Pick a city, see the NBM ensemble probability per temperature bracket side-by-side with Polymarket's YES/NO prices for that bracket — so you can spot mispricing and decide whether to bet.
+
+- [ ] **[Product 1] NBM × Polymarket comparison page (admin tab first, standalone app later)**
+
+  **UX flow:**
+  1. User selects a city (e.g. Miami).
+  2. Clicks "Load" — fetches today's NBM ensemble forecast + all open Polymarket markets for that city.
+  3. Page renders one row per (target_date × temperature bracket):
+     - **NBM empirical probability** — `member_count_in_bracket / 30` (e.g. 3/30 = 10%)
+     - **NBM std dev and skewness** — from stored `temp_std_dev_c` / `skewness`
+     - **Polymarket YES price** (implied probability of that bracket resolving YES)
+     - **Polymarket NO price** (= 1 − YES price roughly)
+     - **Edge** — difference between NBM probability and Polymarket YES price (positive = model says more likely than market implies)
+  4. Table sortable by edge; chart option: grouped bars per target_date (NBM% vs Polymarket YES%).
+
+  **Data sourcing — frontend vs backend:**
+  - NBM data: served by `weather-api /nbm-forecasts`. For a future public app, either add a
+    public (no-auth) variant of this endpoint, or include `nbm_forecasts` in the `weather-sync`
+    GCS/GitHub export so the public app can read it without the API.
+  - Polymarket data: Polymarket exposes a public REST API — markets can be fetched directly
+    from browser JS with no backend or auth required. No need to go through `weather-api`.
+  - **Decision:** admin tab can use `weather-api` (auth already present). Standalone public app
+    should use GCS-exported NBM data + direct Polymarket API calls — zero backend dependency.
+
+  **Bracket alignment:**
+  - Polymarket markets are defined per temperature bracket (e.g. "Will Miami high be 24–25°F?").
+    Need to map market bracket → matching NBM 1°C bins and sum their probabilities.
+  - Bracket definitions vary by market; need to parse them from market titles (the
+    `extractTempThreshold` logic already exists in `weather-polymarket` job).
+
+  **Admin tab:** Add as a new content section `content/nbm-vs-market/_index.md` + layout.
+  Standalone app: new repo under FutureGadgetLabs when ready to productionize.
+
+---
+
+### Product 2 — ML opportunity detection (analytics backend)
+
+**Goal:** Given a snapshot of today's NBM forecast and Polymarket prices, predict whether there is a positive-edge betting opportunity based on how well the model has been calibrated historically.
+
+- [ ] **[Product 2, data] Add `realized_highs` BQ table**
+
+  Standalone source-of-truth for observed daily max temperatures.
+  - Schema: `city STRING, date DATE, actual_max_temp_c FLOAT64, source STRING` (e.g. "open-meteo-archive")
+  - Populated by a new `--backfill-realized` mode (or repurpose `--backfill-actuals`) in `cmd/nbm/main.go`.
+  - Note: `nbm_forecasts.actual_max_temp_c` stores the same data but denormalized across
+    all forecast_date rows per (city, target_date). `realized_highs` is the deduplicated
+    canonical record — one row per (city, date).
+  - `weather-sync` should export this table to GCS + GitHub alongside existing exports.
+
+- [ ] **[Product 2, data] Add `nbm_market_features` BQ view (feature engineering layer)**
+
+  A BQ view (not a table — derived on-demand) joining:
+  - `nbm_forecasts` — ensemble stats + member_temps per (city, target_date, forecast_date)
+  - `polymarket_snapshots` — YES/NO prices per (city, target_date, bracket, snapshot_time)
+  - `realized_highs` — actual outcome per (city, target_date)
+
+  Key derived columns:
+  - `nbm_bracket_prob` — fraction of members falling within the Polymarket bracket
+  - `market_yes_price` — Polymarket implied YES probability at snapshot time
+  - `edge` — `nbm_bracket_prob − market_yes_price`
+  - `resolved_yes` — 1 if actual high fell within bracket, 0 otherwise (nullable until resolved)
+  - `lead_days` — days from forecast_date to target_date (model accuracy degrades with lead)
+
+  This view is the training dataset for all ML models.
+
+- [ ] **[Product 2, ML] Build calibration model and `ml_opportunity_scores` BQ table**
+
+  **What the model predicts:** Given (city, target_date, bracket, snapshot_date), is the NBM
+  ensemble's probability well-calibrated vs. the Polymarket price? If NBM says 30% and the
+  market says 15%, is that a real edge or is the NBM model systematically overconfident at
+  this lead time / city / temperature range?
+
+  **Architecture:**
+  - Python Cloud Run job (`cmd/ml` or `scripts/ml_score.py`) — runs on demand or daily.
+  - Reads `nbm_market_features` from BQ as training/inference data.
+  - Model: start simple — logistic regression or isotonic regression to calibrate NBM
+    probabilities against historical `resolved_yes` outcomes, grouped by lead_days bucket.
+  - Outputs written to new BQ table `ml_opportunity_scores`:
+
+  ```
+  city STRING
+  target_date DATE
+  bracket STRING               -- e.g. "24–25°C"
+  snapshot_date DATE
+  nbm_raw_prob FLOAT64         -- raw ensemble fraction
+  nbm_calibrated_prob FLOAT64  -- model-adjusted probability
+  market_yes_price FLOAT64     -- Polymarket price at snapshot
+  raw_edge FLOAT64             -- nbm_raw_prob − market_yes_price
+  calibrated_edge FLOAT64      -- nbm_calibrated_prob − market_yes_price
+  kelly_fraction FLOAT64       -- Kelly criterion bet size suggestion
+  model_version STRING
+  scored_at TIMESTAMP
+  ```
+
+  **Is this a new BQ table or derived?**
+  - `nbm_market_features` = BQ view (derived, no storage cost, recomputed on query).
+  - `ml_opportunity_scores` = real BQ table (materialized — model output is expensive to
+    recompute and needs to be queryable by the frontend without re-running inference).
+
+  **Frontend (Product 1 extension):** The comparison UI (Product 1) can optionally surface
+  `calibrated_edge` and `kelly_fraction` from this table once it exists, turning it from a
+  raw data view into an actionable recommendation.
+
+---
+
 - [x] **NBM bin probabilities: store raw member temps** ✓ 2026-03-30
   - Added `member_temps REPEATED FLOAT64` to `nbm_forecasts` schema.
   - `cmd/nbm/main.go` stores raw 30-member values; `ensureColumns()` auto-migrates existing table.
