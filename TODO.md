@@ -3,50 +3,24 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
+Last updated: 2026-03-31 (session 9)
+
+---
+
+## In Progress (session 9)
+
+- [x] **Rename "NBM Forecasts" → "Open-Meteo Forecasts" throughout frontend** ✓ 2026-03-31
+  - Renamed content dir, layout dir, navbar link, page title, auth-guard message.
+  - Backend: added `/open-meteo-forecasts` route alias in `internal/api/server.go`; old `/nbm-forecasts` kept for compatibility.
+  - The underlying model is GFS seamless via Open-Meteo — not NOAA's NBM.
+
+- [ ] **Research + design new forecast model ingestion pipelines**
+  - Raw data principle: new ingest jobs store API output as-is; no derived stats computed at ingest.
+  - Models to add (see Backlog → Forecast Model Expansion).
 
 ---
 
 ## Next Up
-
-- [ ] **[IN PROGRESS] Build `cloud-predict-analytics-market-edge` repo** — resume session 7
-  - Repo path: `../cloud-predict-analytics-market-edge/` (sibling dir, not yet git-init'd)
-  - Repo name: `cloud-predict-analytics-market-edge`
-  - Purpose: auth-gated (Firebase + ALLOWED_EMAILS) NBM vs Polymarket comparison UI.
-    Pick a city → fetch NBM from weather-api + Polymarket markets from Gamma API → show
-    bracket-by-bracket comparison table (YES%, NBM%, edge) + grouped bar chart.
-  - **Files already created** (scaffold is done):
-    - `hugo.toml`, `.env.example`, `.gitignore`
-    - `.github/workflows/deploy.yml`
-    - `content/_index.md`
-    - `static/css/app.css`, `static/js/firebase-init.js`, `static/js/api.js`, `static/js/app.js`
-    - `themes/edge/layouts/_default/baseof.html`
-    - `themes/edge/layouts/partials/head.html`, `navbar.html`, `footer.html`, `scripts.html`
-  - **Still needed** (pick up here):
-    1. `themes/edge/layouts/index.html` — the main comparison page (most of the work):
-       - Auth guard + sign-in prompt
-       - Controls: city selector (hardcoded CITIES list), forecast date input, Load button
-       - Fetches NBM: `api('GET', '/nbm-forecasts' + qs({ city, forecast_date }))`
-       - Fetches Polymarket per target_date: `GET https://gamma-api.polymarket.com/events?slug={slug}`
-         Slug format: `highest-temperature-in-{city}-on-{month}-{day}-{year}` (e.g. `highest-temperature-in-miami-on-april-4-2026`)
-         Current YES price: `market.outcomePrices[0]` (string "0.75" → multiply × 100 for %)
-       - Bracket parsing (JS): handle "X-Y°C", "X-Y°F" (convert to °C), "above X°C/F", "below X°C/F"
-         For "above X°C": NBM prob = members >= X / total
-         For "X-Y°C": NBM prob = members in [lo, hi) / total
-       - Table per target_date: Bracket | Polymarket YES% | NBM% | Edge | Members/30
-         Edge color: green (>+5%) = YES value, red (<-5%) = NO value, gray = neutral
-       - Chart: date selector → grouped bar chart (Chart.js), brackets on X-axis,
-         Polymarket YES% (orange) and NBM% (blue) as two bar series
-       - Dates with no Polymarket market: show NBM row with "No market" in Polymarket column
-    2. `CLAUDE.md` for the new repo (project instructions)
-    3. `git init` + initial commit + push to new GitHub repo `FG-PolyLabs/cloud-predict-analytics-market-edge`
-    4. Set up GitHub Pages + repo secrets/vars (same Firebase project as admin, same ALLOWED_EMAILS)
-  - **Key design notes from code review:**
-    - `extractTempThreshold` in Go takes upper bound of "X-Y°C" ranges (e.g. "24-25°C" → 25.0)
-    - Gamma API is CORS-enabled (public); if CORS fails in practice, add proxy endpoint to weather-api
-    - `OutcomePrices` field on GammaMarket = `["0.75", "0.25"]` (YES, NO as decimal strings)
-    - City slugs used in Polymarket match BQ city slugs directly ("nyc", "buenos-aires", etc.)
-    - Fetch all dates in parallel with `Promise.all` for speed
 
 - [x] **Backfill actual_max_temp_c for past target_dates** ✓ 2026-03-30
   - Added `--backfill-actuals` flag to `cmd/nbm/main.go`.
@@ -79,27 +53,161 @@ Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
 
 ---
 
-### Product 1 — NBM vs Polymarket comparison UI
+### Forecast Model Expansion
 
-**Goal:** A decision-support tool. Pick a city, see the NBM ensemble probability per temperature bracket side-by-side with Polymarket's YES/NO prices for that bracket — so you can spot mispricing and decide whether to bet.
+**Design principle:** Ingest jobs store raw API/GRIB output only. Derived stats (mean, std dev,
+skewness, percentiles) are computed at query time or in the frontend — not baked in at ingest.
 
-- [ ] **[Product 1] NBM × Polymarket comparison page (admin tab first, standalone app later)**
+- [x] **[Models] ECMWF ensemble via Open-Meteo — new BQ table + admin dashboard** ✓ 2026-03-31
+  - Model: `ecmwf_ifs025` (51 members, ~25 km global, best-in-class NWP skill)
+  - `cmd/ecmwf/main.go` — fetches raw member arrays from Open-Meteo, writes to BQ `ecmwf_forecasts`
+  - Schema: city, target_date, forecast_date, lead_days, member_count, member_temps[], model, fetched_at, actual_max_temp_c, error_c (no pre-computed stats)
+  - `internal/api/ecmwf.go` — `GET /ecmwf-forecasts` handler; returns raw rows
+  - Frontend: `content/ecmwf-forecasts/` + layout; stats (mean, σ, p10/p90, skewness) computed from member_temps in JS via `enrichRow()`
+  - Dockerfile + build.yml updated to build/deploy `weather-ecmwf` Cloud Run job
+  - **Still needed:** Create `weather-ecmwf` Cloud Run job in GCP + schedule at 00:45 UTC (see setup.sh pattern from weather-nbm)
+
+- [ ] **[Models] ICON ensemble via Open-Meteo — new BQ table + admin dashboard**
+  - Model: `icon_seamless` (DWD, ~13 km, 40 members, strong in Europe)
+  - Same approach as ECMWF above; BQ table `icon_forecasts`
+  - New admin page: `content/icon-forecasts/`
+
+- [ ] **[Models] Real NOAA NBM data — new BQ table + admin dashboard**
+  - Source: AWS S3 public bucket `s3://noaa-nbm-grib2-pds/` (no auth required)
+  - File pattern: `blend.YYYYMMDD/HH/core/blend.tHHz.core.fFFF.co.grib2` (CONUS only)
+  - Format: GRIB2 — requires `cfgrib` (Python) or `wgrib2` CLI to parse
+  - **US-only limitation:** NBM covers CONUS/AK/HI only → applicable cities: chicago, dallas, miami, nyc
+    (toronto is Canada and would need the separate `blend.*.ak.grib2` — not covered; skip)
+  - Raw fields to store: `tmax_mean`, `tmax_spread`, `tmax_p10`, `tmax_p25`, `tmax_p50`, `tmax_p75`, `tmax_p90`
+    — these are what NBM publishes; individual members are NOT available (NBM is already a blend)
+  - BQ table: `nbm_noaa_forecasts` — schema: city, target_date, forecast_date (model run date),
+    lead_days, model_run_hour, tmax_mean_c, tmax_spread_c, tmax_p10_c, tmax_p25_c, tmax_p50_c,
+    tmax_p75_c, tmax_p90_c, fetched_at
+  - Implementation: Python Cloud Run job (easier GRIB2 tooling than Go)
+  - New admin page: `content/nbm-noaa-forecasts/`
+  - Note: since NBM doesn't expose raw members, "raw" here means storing the published GRIB fields
+    without further transformation — no client-side stats needed beyond what NBM already provides
+
+- [ ] **[Models] Tomorrow.io ensemble forecasts — new BQ table + admin dashboard + market-edge source**
+  - API: `GET https://api.tomorrow.io/v4/weather/forecast?location={lat},{lon}&timesteps=1d&apikey={key}`
+  - Free tier: 500 calls/day, 25/hour — feasible for 12 cities × 10-day horizon (~120 calls/run)
+  - **Ensemble exposure:** Tomorrow.io exposes a probabilistic forecasting endpoint (21–51 members
+    depending on tier); investigate whether free tier includes PDF/confidence interval fields or
+    only deterministic `temperatureMax`. If probabilistic is paid-only, fall back to deterministic
+    storage (same schema as Pirate Weather / OWM below) and use analytical fit in market-edge UI.
+  - **If ensemble data is available:** store raw member arrays exactly like `open_meteo_forecasts`
+    — member_temps[], member_count; bracket probability computed client-side from member counts.
+  - **If deterministic only:** store point forecast + any spread/confidence fields returned:
+    `tmax_c`, `tmax_low_c` (10th pct), `tmax_high_c` (90th pct) if available; use analytical
+    fit in market-edge UI (no Raw Members% column — Fit% only).
+  - BQ table: `tomorrow_forecasts`
+  - Schema (deterministic): city, target_date, forecast_date, lead_days, tmax_c, tmax_low_c,
+    tmax_high_c, model, fetched_at, actual_max_temp_c, error_c
+  - Schema (ensemble): same as `open_meteo_forecasts` — city, target_date, forecast_date,
+    lead_days, member_count, member_temps[], model, fetched_at, actual_max_temp_c, error_c
+  - Backend: new Cloud Run job `weather-tomorrow` (`cmd/tomorrow/main.go`)
+  - Admin page: `content/tomorrow-forecasts/`
+  - **Market-edge integration:** add Tomorrow.io as a selectable source (see multi-source TODO below)
+  - API key: store in Secret Manager as `TOMORROW_API_KEY`; add to Cloud Run job env
+
+- [ ] **[Models] Pirate Weather deterministic forecasts — new BQ table + admin dashboard + market-edge source**
+  - API: `GET https://api.pirateweather.net/forecast/{key}/{lat},{lon}?exclude=currently,minutely,hourly,alerts`
+  - Free tier: 20,000 calls/month (~667/day) — well within budget for 12 cities daily
+  - **No ensemble exposure:** uses GEFS 30-member ensemble internally but only returns deterministic
+    daily output. Store point forecast only; market-edge UI uses analytical fit.
+  - Daily max field: `daily.data[].temperatureHigh` (in °F by default — convert to °C at ingest)
+  - Additional fields worth storing: `temperatureLow`, `temperatureHighTime`, `precipProbability`,
+    `precipIntensity`, `precipType`, `windSpeed`, `humidity`, `icon`
+  - BQ table: `pirate_weather_forecasts`
+  - Schema: city, target_date, forecast_date, lead_days, tmax_c, tmin_c, precip_prob,
+    precip_intensity, wind_speed, humidity, icon, fetched_at, actual_max_temp_c, error_c
+  - Backend: new Cloud Run job `weather-pirate` (`cmd/pirate/main.go`)
+  - Admin page: `content/pirate-weather-forecasts/`
+  - **Market-edge integration:** deterministic source — Fit%-only in market-edge UI (no Members%);
+    σ estimated from historical error distribution for this source (see calibration TODO below)
+  - API key: store in Secret Manager as `PIRATE_WEATHER_API_KEY`; add to Cloud Run job env
+  - Note: dark-sky-compatible API — response shape closely mirrors Dark Sky JSON
+
+- [ ] **[Models] OpenWeatherMap deterministic forecasts — new BQ table + admin dashboard + market-edge source**
+  - API: `GET https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&exclude=current,minutely,hourly,alerts&units=metric&appid={key}`
+  - Free tier: 1,000 calls/day — plenty of headroom for 12 cities
+  - **No ensemble exposure:** deterministic point forecast only; use analytical fit in market-edge UI
+  - Daily max field: `daily[].temp.max` (°C when `units=metric`)
+  - Additional fields: `daily[].temp.min`, `daily[].temp.morn/day/eve/night`, `daily[].feels_like`,
+    `daily[].pop` (precip prob), `daily[].wind_speed`, `daily[].humidity`, `daily[].weather[0].main`
+  - BQ table: `owm_forecasts`
+  - Schema: city, target_date, forecast_date, lead_days, tmax_c, tmin_c, precip_prob,
+    wind_speed, humidity, weather_main, fetched_at, actual_max_temp_c, error_c
+  - Backend: new Cloud Run job `weather-owm` (`cmd/owm/main.go`)
+  - Admin page: `content/owm-forecasts/`
+  - **Market-edge integration:** deterministic source — Fit%-only in market-edge UI (no Members%)
+  - API key: store in Secret Manager as `OWM_API_KEY`; add to Cloud Run job env
+  - Note: OWM One Call 3.0 requires a credit card on file; billed only above 1K calls/day
+
+- [ ] **[Models] Generalize ingestion: consider a single `open_meteo_forecasts` table with `model` column**
+  - Instead of separate tables per Open-Meteo model (ecmwf, icon, gfs), a single table with
+    a `model STRING` column reduces schema duplication. Evaluate after ECMWF job is built.
+
+- [ ] **[Models] Per-source σ calibration for deterministic forecasts (Pirate Weather, OWM)**
+  - Deterministic sources (Pirate Weather, OWM) have no ensemble spread, so the market-edge
+    Fit% column needs a σ estimate to fit a distribution over the bracket.
+  - Approach: after accumulating ≥30 days of `actual_max_temp_c` vs `tmax_c`, compute
+    rolling historical RMSE per (city, lead_days) bucket. Use RMSE as σ in the normal/skew-normal
+    fit for that source+city+lead combination.
+  - Store calibration outputs in a BQ table `source_calibration`:
+    city, source, lead_days_bucket (1-3, 4-7, 8-10), rmse_c, bias_c, n_samples, computed_at
+  - Market-edge UI reads calibration via a new `/source-calibration` API endpoint and uses
+    the matching RMSE as σ when computing Fit% for deterministic sources.
+  - Initially: fall back to a fixed σ = 2.5°C (reasonable prior for 1-week lead) until
+    enough data has accumulated for empirical calibration.
+
+---
+
+### Market Edge UI — Multi-Source Support
+
+- [ ] **[Market Edge] Add source selector to market-edge comparison UI**
+  - Currently hardcoded to Open-Meteo GFS (`/nbm-forecasts` endpoint).
+  - As new forecast sources come online (Tomorrow.io, Pirate Weather, OWM, ECMWF), the
+    comparison UI should let the user pick which model to compare against Polymarket prices.
+  - **UX:** Add a "Model" dropdown next to the city/date controls. Options populated from a
+    static list in JS (same pattern as CITIES const). Initially: Open-Meteo GFS, ECMWF IFS.
+    Add new entries as each ingest job ships.
+  - **Table columns per source type:**
+    - *Ensemble source* (Open-Meteo GFS, ECMWF, Tomorrow.io if probabilistic): show
+      Members%, Members count, Raw Edge, ROI, Fit%, Fit Edge, Fit ROI — current full layout.
+    - *Deterministic source* (Pirate Weather, OWM, Tomorrow.io if deterministic-only): hide
+      Members% and Members columns (show "—"); show only Fit%, Fit Edge, Fit ROI.
+      Use calibrated σ (from `source_calibration` table) or fixed σ = 2.5°C fallback.
+  - **API routing:** each source maps to its own backend endpoint
+    (`/nbm-forecasts`, `/ecmwf-forecasts`, `/tomorrow-forecasts`, `/pirate-forecasts`, `/owm-forecasts`).
+    The `loadComparison()` function picks the endpoint based on the selected model.
+  - **Blocker:** depends on at least one new ingest job being live and returning data.
+
+---
+
+### Product 1 — Open-Meteo Ensemble vs Polymarket comparison UI
+
+> Previously called "NBM vs Polymarket" — renamed to reflect actual data source.
+> The ensemble data is GFS seamless (30 members) via Open-Meteo, not NOAA NBM.
+
+**Goal:** A decision-support tool. Pick a city, see the Open-Meteo GFS ensemble probability per temperature bracket side-by-side with Polymarket's YES/NO prices for that bracket — so you can spot mispricing and decide whether to bet.
+
+- [ ] **[Product 1] Open-Meteo Ensemble × Polymarket comparison page (admin tab first, standalone app later)**
 
   **UX flow:**
   1. User selects a city (e.g. Miami).
-  2. Clicks "Load" — fetches today's NBM ensemble forecast + all open Polymarket markets for that city.
+  2. Clicks "Load" — fetches today's Open-Meteo GFS ensemble forecast + all open Polymarket markets for that city.
   3. Page renders one row per (target_date × temperature bracket):
-     - **NBM empirical probability** — `member_count_in_bracket / 30` (e.g. 3/30 = 10%)
-     - **NBM std dev and skewness** — from stored `temp_std_dev_c` / `skewness`
+     - **Ensemble empirical probability** — `member_count_in_bracket / 30` (e.g. 3/30 = 10%)
      - **Polymarket YES price** (implied probability of that bracket resolving YES)
      - **Polymarket NO price** (= 1 − YES price roughly)
-     - **Edge** — difference between NBM probability and Polymarket YES price (positive = model says more likely than market implies)
-  4. Table sortable by edge; chart option: grouped bars per target_date (NBM% vs Polymarket YES%).
+     - **Edge** — difference between ensemble probability and Polymarket YES price (positive = model says more likely than market implies)
+  4. Table sortable by edge; chart option: grouped bars per target_date (ensemble% vs Polymarket YES%).
 
   **Data sourcing:**
   - Access-controlled: restricted to authorized emails via Firebase Auth (same whitelist as
     admin site). Not public — no GCS/GitHub export needed.
-  - NBM data: fetched from `weather-api /nbm-forecasts` with Firebase ID token (same `api()`
+  - Ensemble data: fetched from `weather-api /open-meteo-forecasts` with Firebase ID token (same `api()`
     helper pattern as admin). No new public endpoint or GCS export required.
   - Polymarket data: Polymarket exposes a public REST API — fetch directly from browser JS,
     no backend proxy needed.
@@ -109,40 +217,40 @@ Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
 
   **Bracket alignment:**
   - Polymarket markets are defined per temperature bracket (e.g. "Will Miami high be 24–25°F?").
-    Need to map market bracket → matching NBM 1°C bins and sum their probabilities.
+    Need to map market bracket → matching ensemble 1°C bins and sum their probabilities.
   - Bracket definitions vary by market; need to parse them from market titles (the
     `extractTempThreshold` logic already exists in `weather-polymarket` job).
 
-  **Admin tab:** Add as a new content section `content/nbm-vs-market/_index.md` + layout.
+  **Admin tab:** Add as a new content section `content/ensemble-vs-market/_index.md` + layout.
   Standalone app: new repo under FutureGadgetLabs when ready to productionize.
 
 ---
 
 ### Product 2 — ML opportunity detection (analytics backend)
 
-**Goal:** Given a snapshot of today's NBM forecast and Polymarket prices, predict whether there is a positive-edge betting opportunity based on how well the model has been calibrated historically.
+**Goal:** Given a snapshot of today's Open-Meteo GFS ensemble forecast and Polymarket prices, predict whether there is a positive-edge betting opportunity based on how well the model has been calibrated historically.
 
 - [ ] **[Product 2, data] Add `realized_highs` BQ table**
 
   Standalone source-of-truth for observed daily max temperatures.
   - Schema: `city STRING, date DATE, actual_max_temp_c FLOAT64, source STRING` (e.g. "open-meteo-archive")
   - Populated by a new `--backfill-realized` mode (or repurpose `--backfill-actuals`) in `cmd/nbm/main.go`.
-  - Note: `nbm_forecasts.actual_max_temp_c` stores the same data but denormalized across
+  - Note: `open_meteo_forecasts.actual_max_temp_c` stores the same data but denormalized across
     all forecast_date rows per (city, target_date). `realized_highs` is the deduplicated
     canonical record — one row per (city, date).
   - `weather-sync` should export this table to GCS + GitHub alongside existing exports.
 
-- [ ] **[Product 2, data] Add `nbm_market_features` BQ view (feature engineering layer)**
+- [ ] **[Product 2, data] Add `ensemble_market_features` BQ view (feature engineering layer)**
 
   A BQ view (not a table — derived on-demand) joining:
-  - `nbm_forecasts` — ensemble stats + member_temps per (city, target_date, forecast_date)
+  - `open_meteo_forecasts` — raw member_temps per (city, target_date, forecast_date)
   - `polymarket_snapshots` — YES/NO prices per (city, target_date, bracket, snapshot_time)
   - `realized_highs` — actual outcome per (city, target_date)
 
   Key derived columns:
-  - `nbm_bracket_prob` — fraction of members falling within the Polymarket bracket
+  - `ensemble_bracket_prob` — fraction of members falling within the Polymarket bracket
   - `market_yes_price` — Polymarket implied YES probability at snapshot time
-  - `edge` — `nbm_bracket_prob − market_yes_price`
+  - `edge` — `ensemble_bracket_prob − market_yes_price`
   - `resolved_yes` — 1 if actual high fell within bracket, 0 otherwise (nullable until resolved)
   - `lead_days` — days from forecast_date to target_date (model accuracy degrades with lead)
 
@@ -150,35 +258,35 @@ Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
 
 - [ ] **[Product 2, ML] Build calibration model and `ml_opportunity_scores` BQ table**
 
-  **What the model predicts:** Given (city, target_date, bracket, snapshot_date), is the NBM
-  ensemble's probability well-calibrated vs. the Polymarket price? If NBM says 30% and the
-  market says 15%, is that a real edge or is the NBM model systematically overconfident at
+  **What the model predicts:** Given (city, target_date, bracket, snapshot_date), is the Open-Meteo
+  ensemble's probability well-calibrated vs. the Polymarket price? If the ensemble says 30% and the
+  market says 15%, is that a real edge or is the model systematically overconfident at
   this lead time / city / temperature range?
 
   **Architecture:**
   - Python Cloud Run job (`cmd/ml` or `scripts/ml_score.py`) — runs on demand or daily.
-  - Reads `nbm_market_features` from BQ as training/inference data.
-  - Model: start simple — logistic regression or isotonic regression to calibrate NBM
+  - Reads `ensemble_market_features` from BQ as training/inference data.
+  - Model: start simple — logistic regression or isotonic regression to calibrate ensemble
     probabilities against historical `resolved_yes` outcomes, grouped by lead_days bucket.
   - Outputs written to new BQ table `ml_opportunity_scores`:
 
   ```
   city STRING
   target_date DATE
-  bracket STRING               -- e.g. "24–25°C"
+  bracket STRING                   -- e.g. "24–25°C"
   snapshot_date DATE
-  nbm_raw_prob FLOAT64         -- raw ensemble fraction
-  nbm_calibrated_prob FLOAT64  -- model-adjusted probability
-  market_yes_price FLOAT64     -- Polymarket price at snapshot
-  raw_edge FLOAT64             -- nbm_raw_prob − market_yes_price
-  calibrated_edge FLOAT64      -- nbm_calibrated_prob − market_yes_price
-  kelly_fraction FLOAT64       -- Kelly criterion bet size suggestion
+  ensemble_raw_prob FLOAT64        -- raw ensemble fraction
+  ensemble_calibrated_prob FLOAT64 -- model-adjusted probability
+  market_yes_price FLOAT64         -- Polymarket price at snapshot
+  raw_edge FLOAT64                 -- ensemble_raw_prob − market_yes_price
+  calibrated_edge FLOAT64          -- ensemble_calibrated_prob − market_yes_price
+  kelly_fraction FLOAT64           -- Kelly criterion bet size suggestion
   model_version STRING
   scored_at TIMESTAMP
   ```
 
   **Is this a new BQ table or derived?**
-  - `nbm_market_features` = BQ view (derived, no storage cost, recomputed on query).
+  - `ensemble_market_features` = BQ view (derived, no storage cost, recomputed on query).
   - `ml_opportunity_scores` = real BQ table (materialized — model output is expensive to
     recompute and needs to be queryable by the frontend without re-running inference).
 
@@ -219,6 +327,24 @@ Last updated: 2026-03-31 (session 7, paused mid-build of market-edge repo)
 - [ ] **Auto-discover new Polymarket markets for tracked cities**
   - Discovery source: https://polymarket.com/weather/temperature
   - Should log newly found cities rather than auto-add (human review before tracking).
+
+---
+
+## Recently Completed (2026-03-31, session 8)
+
+- [x] **Build `cloud-predict-analytics-market-edge` repo** ✓ 2026-03-31
+  - Repo: https://github.com/FG-PolyLabs/cloud-predict-analytics-market-edge
+  - Live: https://fg-polylabs.github.io/cloud-predict-analytics-market-edge/
+  - Hugo static site, same Firebase Auth + ALLOWED_EMAILS as admin frontend.
+  - `themes/edge/layouts/index.html` — full comparison UI:
+    - City selector (hardcoded CITIES const), forecast date, Load button.
+    - Fetches NBM from weather-api + Polymarket from Gamma API in parallel (Promise.all).
+    - Bracket parsing: "X-Y°C/F", "above X°C/F", "below X°C/F" → NBM member count.
+    - Table per target_date: Bracket | PM YES% | NBM% | Edge (±5% threshold) | Members/30.
+    - Chart: date selector → grouped bar (orange = PM YES%, blue = NBM%) via Chart.js.
+  - Org-level secrets/vars (Firebase + ALLOWED_EMAILS) auto-available (visibility = all repos).
+  - Repo-level vars set: `HUGO_PARAMS_BACKENDURL`, `PAGES_BASE_URL`.
+  - GitHub Pages enabled, `main` branch policy configured, first deploy successful.
 
 ---
 
