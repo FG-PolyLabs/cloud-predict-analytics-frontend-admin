@@ -55,20 +55,26 @@ Last updated: 2026-03-31 (session 9)
 
 ### Infrastructure / Cost Reduction
 
-- [ ] **[Infra] Migrate container images from Artifact Registry to GitHub Container Registry (ghcr.io)**
+- [ ] **[Infra] Migrate container images from Artifact Registry to Docker Hub (public)**
   - Artifact Registry charges $0.10/GB/month storage. For a project with several Cloud Run jobs
     (weather-api, weather-nbm, weather-ecmwf, weather-polymarket, weather-sync) this adds up.
-  - **Recommended target: ghcr.io** (GitHub Container Registry) — free for public repos, already
-    authenticated via `GITHUB_TOKEN` in Actions (no extra secret needed), and the repos are already
-    on GitHub. Better choice than Docker Hub whose free tier now limits to 1 private repo.
+  - **Target: Docker Hub public repos** — free for unlimited public images; Cloud Run can pull
+    public Docker Hub images natively with no extra auth or credential configuration needed.
+    GHCR is also free for public repos but requires additional Cloud Run credential setup for
+    private images — Docker Hub public avoids that concern entirely.
   - **Changes needed (all in `cloud-predict-analytics` repo):**
-    1. `.github/workflows/build.yml` — change `docker build` push target from
-       `us-central1-docker.pkg.dev/fg-polylabs/...` to `ghcr.io/fg-polylabs/...`
-    2. Add `packages: write` permission to the workflow job
-    3. Login step: `docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}`
-    4. Update all Cloud Run deploy steps to reference the new `ghcr.io/...` image URL
+    1. Create a Docker Hub account/org (e.g. `fgpolylabs`) and create public repos for each image
+    2. Add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub org secrets
+    3. `.github/workflows/build.yml` — replace the `gcloud auth` + Artifact Registry push steps with:
+       ```yaml
+       - uses: docker/login-action@v3
+         with:
+           username: ${{ secrets.DOCKERHUB_USERNAME }}
+           password: ${{ secrets.DOCKERHUB_TOKEN }}
+       - run: docker build -t fgpolylabs/weather-api:latest . && docker push fgpolylabs/weather-api:latest
+       ```
+    4. Update all `gcloud run deploy` steps to reference `docker.io/fgpolylabs/weather-api:latest`
     5. After confirming deploys work, delete the Artifact Registry repository in GCP console
-  - Images can be public (fine for open-source jobs) or private (requires org-level package settings)
   - One-time migration; no ongoing code changes after the workflow is updated
 
 - [ ] **[Infra] Homeserver-first scheduled jobs with Cloud Run as fallback**
@@ -100,50 +106,53 @@ Last updated: 2026-03-31 (session 9)
   - **Failure alerting:** if `runner='cloud-run'` appears in `job_heartbeats` on a day when
     it should have been `runner='homeserver'`, surface a warning in the admin UI health check
 
-- [ ] **[Infra] Homelab-primary API routing via Cloudflare Workers + Tunnel**
-  - **Goal:** Route `weather-api` traffic to a self-hosted instance on the homelab as primary,
-    with Cloud Run as automatic fallback. Zero-downtime failover; no user-visible change.
-  - **Why not Cloudflare Load Balancer:** it costs $5+/month per hostname — not worth it for
-    a low-traffic internal API.
-  - **Free architecture using Cloudflare Workers + Tunnel:**
+- [ ] **[Infra] Homelab-primary API via nginx reverse proxy + manual Cloud Run fallback**
+  - **Goal:** Route `weather-api` traffic to a self-hosted Go binary on the homelab as primary.
+    Cloud Run remains deployed but idle (scales to zero). If homelab goes down, manually update
+    DNS to point at Cloud Run until homelab is restored.
+  - **Why not automatic failover:** any failover mechanism that runs on the homelab (nginx,
+    Cloudflare Tunnel, etc.) goes down with the homelab — automatic failover requires an external
+    component (e.g. Cloudflare Workers). Manual DNS failover is simpler and sufficient for this
+    project's availability requirements.
+  - **Architecture:**
     ```
-    Client → api.yourdomain.com
-           → Cloudflare Worker (free: 100K req/day)
-               ├─ try: homelab via Cloudflare Tunnel (outbound-only, no open ports needed)
-               │        cloudflared daemon runs on Proxmox node, exposes Go API on :8080
-               └─ on timeout/error: fallback to Cloud Run URL
+    api.yourdomain.com (Cloudflare DNS, proxied)
+      └─ points to homelab IP (nginx on Proxmox)
+           └─ nginx reverse proxy → weather-api Go binary on :8080
+
+    Manual fallback: update Cloudflare DNS A record to Cloud Run IP (or CNAME to Cloud Run URL)
     ```
-  - **Worker logic (simple):**
-    ```js
-    const HOMELAB = 'https://weather-api-home.yourdomain.com'; // Tunnel hostname
-    const CLOUD_RUN = 'https://weather-api-xxx-uc.a.run.app';
-    export default {
-      async fetch(request) {
-        try {
-          const resp = await fetch(HOMELAB + new URL(request.url).pathname + ...,
-            { signal: AbortSignal.timeout(3000) }); // 3s timeout
-          if (resp.ok || resp.status < 500) return resp;
-        } catch (_) {}
-        return fetch(CLOUD_RUN + ...); // fallback
-      }
+  - **Homelab setup (Proxmox LXC):**
+    1. Build or pull the `weather-api` binary (same Docker image or compile from source)
+    2. Run as a systemd service on port 8080 inside an LXC container
+    3. Same env vars as Cloud Run — store in `/etc/weather-api.env`, loaded by the systemd unit
+    4. GCP credentials: create a service account key JSON, store securely on the LXC
+       (or use Workload Identity Federation if preferred — no long-lived keys)
+    5. nginx config: standard `proxy_pass http://localhost:8080`, SSL termination via
+       Let's Encrypt (certbot) or Cloudflare's edge TLS (origin cert)
+  - **nginx config sketch:**
+    ```nginx
+    server {
+        listen 443 ssl;
+        server_name api.yourdomain.com;
+        # SSL: either Let's Encrypt cert or Cloudflare origin cert
+        location / {
+            proxy_pass http://127.0.0.1:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
     }
     ```
-  - **Cloudflare Tunnel setup (free):**
-    1. Install `cloudflared` on Proxmox node
-    2. `cloudflared tunnel create weather-api-home`
-    3. Configure to expose the Go API HTTP port
-    4. Assign a hostname (e.g., `weather-api-home.yourdomain.com`) in Zero Trust dashboard
-    5. No inbound firewall ports needed — tunnel is outbound-only
-  - **Homelab API instance:** same binary as Cloud Run (`weather-api`), same env vars,
-    run via systemd in a Proxmox LXC. Needs GCP credentials for BQ access (service account key
-    or Workload Identity). No Cloud Run-specific config changes needed.
-  - **DNS:** point `api.yourdomain.com` CNAME to the Cloudflare Worker route (not directly to
-    Cloud Run). Worker handles the primary/fallback logic transparently.
-  - **100K req/day Workers free tier** is well above expected traffic for this project.
-    If traffic grows, Workers Paid is $5/month for 10M requests — still cheaper than always-on Cloud Run.
-  - **Cost impact:** Cloud Run scales to zero when homelab is healthy. Cloud Run only runs when
-    homelab is down or overloaded. Firebase Auth validation still happens in the API binary
-    regardless of which runner is serving the request.
+  - **Manual failover procedure (if homelab goes down):**
+    1. Log in to Cloudflare dashboard
+    2. Update the `api.yourdomain.com` A/CNAME record to point at the Cloud Run service URL
+    3. Cloud Run scales up automatically on first request
+    4. When homelab is restored, revert the DNS record
+  - **Cost impact:** Cloud Run `weather-api` scales to zero when homelab is healthy — zero cost
+    during normal operation. Cloud Run costs only incur during homelab downtime.
+  - **Firebase Auth:** validation happens inside the Go binary regardless of where it runs —
+    no changes to auth flow needed
 
 ---
 
