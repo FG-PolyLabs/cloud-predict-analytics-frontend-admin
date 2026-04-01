@@ -88,45 +88,43 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
   - Note: since NBM doesn't expose raw members, "raw" here means storing the published GRIB fields
     without further transformation — no client-side stats needed beyond what NBM already provides
 
-- [ ] **[Models] Tomorrow.io ensemble forecasts — new BQ table + admin dashboard + market-edge source**
-  - API: `GET https://api.tomorrow.io/v4/weather/forecast?location={lat},{lon}&timesteps=1d&apikey={key}`
-  - Free tier: 500 calls/day, 25/hour — feasible for 12 cities × 10-day horizon (~120 calls/run)
-  - **Ensemble exposure:** Tomorrow.io exposes a probabilistic forecasting endpoint (21–51 members
-    depending on tier); investigate whether free tier includes PDF/confidence interval fields or
-    only deterministic `temperatureMax`. If probabilistic is paid-only, fall back to deterministic
-    storage (same schema as Pirate Weather / OWM below) and use analytical fit in market-edge UI.
-  - **If ensemble data is available:** store raw member arrays exactly like `open_meteo_forecasts`
-    — member_temps[], member_count; bracket probability computed client-side from member counts.
-  - **If deterministic only:** store point forecast + any spread/confidence fields returned:
-    `tmax_c`, `tmax_low_c` (10th pct), `tmax_high_c` (90th pct) if available; use analytical
-    fit in market-edge UI (no Raw Members% column — Fit% only).
+- [ ] **[Models] Tomorrow.io — point-estimate daily high ingest** ⚠️ LOW PRIORITY
+  - **What they provide:** deterministic daily `temperatureMax` point estimate only on free tier.
+    Probabilistic endpoint (p5/p10/p25/p50/p75/p90/p95) is confirmed paid-only and hourly-only
+    (not daily); deriving daily high distribution from hourly percentiles is an approximation
+    and not worth the cost at this stage.
+  - **Prerequisite before building:** sign up for free API key, make one test call with
+    `timesteps=1d` and verify: (a) `temperatureMax` is in the daily response, (b) it represents
+    the true daily high (not a midday spot temp or average). Until verified, schema is TBD.
+  - **Market-edge role:** point-estimate column only — shows predicted high + fetch time alongside
+    ensemble-based sources. No Members%, no σ/skew, no edge calculation for this source.
+  - Free tier: 500 calls/day, 25/hour — adequate for 12 cities once verified
   - BQ table: `tomorrow_forecasts`
-  - Schema (deterministic): city, target_date, forecast_date, lead_days, tmax_c, tmax_low_c,
-    tmax_high_c, model, fetched_at, actual_max_temp_c, error_c
-  - Schema (ensemble): same as `open_meteo_forecasts` — city, target_date, forecast_date,
-    lead_days, member_count, member_temps[], model, fetched_at, actual_max_temp_c, error_c
+  - Schema (pending verification): city, target_date, forecast_date, lead_days, tmax_c,
+    fetched_at, actual_max_temp_c, error_c
   - Backend: new Cloud Run job `weather-tomorrow` (`cmd/tomorrow/main.go`)
   - Admin page: `content/tomorrow-forecasts/`
-  - **Market-edge integration:** add Tomorrow.io as a selectable source (see multi-source TODO below)
-  - API key: store in Secret Manager as `TOMORROW_API_KEY`; add to Cloud Run job env
+  - API key: store in Secret Manager as `TOMORROW_API_KEY`
 
-- [ ] **[Models] Pirate Weather deterministic forecasts — new BQ table + admin dashboard + market-edge source**
+- [ ] **[Models] Pirate Weather — point-estimate daily high ingest** ⚠️ LOW PRIORITY
+  - **What they provide:** deterministic daily high only. Uses GEFS 30-member ensemble internally
+    but exposes no spread, σ, percentiles, or member arrays for temperature. The only uncertainty
+    field in the API is `precipIntensityError` (precipitation only — useless for our use case).
+  - **Market-edge role:** point-estimate column only — shows predicted high (`temperatureHigh`)
+    + the time that prediction was fetched. No Members%, no σ/skew, no edge calculation.
   - API: `GET https://api.pirateweather.net/forecast/{key}/{lat},{lon}?exclude=currently,minutely,hourly,alerts`
-  - Free tier: 20,000 calls/month (~667/day) — well within budget for 12 cities daily
-  - **No ensemble exposure:** uses GEFS 30-member ensemble internally but only returns deterministic
-    daily output. Store point forecast only; market-edge UI uses analytical fit.
-  - Daily max field: `daily.data[].temperatureHigh` (in °F by default — convert to °C at ingest)
-  - Additional fields worth storing: `temperatureLow`, `temperatureHighTime`, `precipProbability`,
-    `precipIntensity`, `precipType`, `windSpeed`, `humidity`, `icon`
+  - Daily fields to store: `temperatureHigh` (daytime high 6am–6pm, in °F — convert to °C at ingest),
+    `temperatureHighTime`, `temperatureLow`, `precipProbability`, `icon`
+  - Note: `temperatureHigh` (daytime high) is more relevant than `temperatureMax` (true 24h max)
+    for Polymarket markets which resolve on the daytime high
+  - Free tier: 20,000 calls/month — adequate for 12 cities daily with headroom
   - BQ table: `pirate_weather_forecasts`
-  - Schema: city, target_date, forecast_date, lead_days, tmax_c, tmin_c, precip_prob,
-    precip_intensity, wind_speed, humidity, icon, fetched_at, actual_max_temp_c, error_c
+  - Schema: city, target_date, forecast_date, lead_days, tmax_c, tmax_time, tmin_c,
+    precip_prob, icon, fetched_at, actual_max_temp_c, error_c
   - Backend: new Cloud Run job `weather-pirate` (`cmd/pirate/main.go`)
   - Admin page: `content/pirate-weather-forecasts/`
-  - **Market-edge integration:** deterministic source — Fit%-only in market-edge UI (no Members%);
-    σ estimated from historical error distribution for this source (see calibration TODO below)
-  - API key: store in Secret Manager as `PIRATE_WEATHER_API_KEY`; add to Cloud Run job env
-  - Note: dark-sky-compatible API — response shape closely mirrors Dark Sky JSON
+  - API key: store in Secret Manager as `PIRATE_WEATHER_API_KEY`
+  - Note: Dark Sky-compatible response shape
 
 - [ ] **[Models] OpenWeatherMap deterministic forecasts — new BQ table + admin dashboard + market-edge source**
   - API: `GET https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&exclude=current,minutely,hourly,alerts&units=metric&appid={key}`
@@ -163,6 +161,52 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
 
 ---
 
+### AI / Self-Hosted Weather Models
+
+- [ ] **[Models] ECMWF AIFS ensemble via Open-Meteo — new BQ table + admin dashboard** ⭐ HIGH PRIORITY
+  - ECMWF's own AI Forecasting System is already available through Open-Meteo's ensemble API —
+    same interface as existing GFS and ECMWF IFS integrations, trivially easy to add.
+  - Model: `ecmwf_aifs025` (AIFS = Artificial Intelligence Forecasting System)
+    - 51 ensemble members, 0.25° global resolution, 6-hourly, 15-day forecast
+    - Updated every 6 hours via Open-Meteo
+    - Neural network model trained by ECMWF — state-of-the-art AI NWP
+  - Implementation: copy `cmd/ecmwf/main.go`, change model param to `ecmwf_aifs025`, new BQ table
+  - BQ table: `aifs_forecasts` — identical schema to `ecmwf_forecasts`
+    (city, target_date, forecast_date, lead_days, member_count, member_temps[], model, fetched_at,
+    actual_max_temp_c, error_c)
+  - Admin page: `content/aifs-forecasts/` — identical layout to ECMWF page
+  - Market-edge: full ensemble source — Members%, Raw Edge, ROI, Fit%, Fit Edge, Fit ROI
+  - No new API key needed — same Open-Meteo free tier as existing jobs
+  - **This is the easiest high-value add in the backlog — almost zero new code**
+
+- [ ] **[Models] Self-hosted AI ensemble (PanguWeather / GraphCast / GenCast)** ⚠️ RESEARCH / LONG-TERM
+  - **What these are:**
+    - **Pangu-Weather** (Huawei, 2023 Nature paper): transformer-based, 0.25° global, T2M output,
+      deterministic only, BY-NC-SA license (no commercial use), inference requires GPU + ERA5 inputs
+    - **GraphCast** (Google DeepMind): graph neural network, 0.25° global, deterministic,
+      CC BY-NC-SA weights, requires ERA5 initial conditions
+    - **GenCast** (Google DeepMind): diffusion-based ensemble model, generates members via sampling
+      rather than IC perturbation; 1.0° mini version runs in a free Colab notebook; CC BY-NC-SA weights
+  - **Why this is hard to operationalize:**
+    - All three require ERA5 or GFS analysis as initial conditions — NOAA GFS analysis is public
+      but needs downloading and preprocessing daily (~1–2 GB per run)
+    - Running inference for 12 cities still requires a full global model pass (can't run per-city)
+    - GenCast 1° mini is the most accessible but 1° resolution (~110 km) is coarse for city temps
+    - All weights are CC BY-NC-SA — non-commercial only; review before any monetization
+    - Cloud Run does not support GPUs — would need a separate GCE GPU VM or Vertex AI job
+  - **Potential value:** GenCast specifically produces true ensemble members via diffusion sampling,
+    which would give bracket probabilities comparable to Open-Meteo GFS/ECMWF. If it can be run
+    cheaply enough (Colab or spot GPU), it adds a fully independent AI ensemble signal.
+  - **Recommended path if pursuing:**
+    1. Start with GenCast 1.0deg mini — confirm it runs end-to-end in Colab for a single date
+    2. Extract T2M for our 12 city coordinates, compute daily max across 24h of hourly outputs
+    3. Run N=30+ samples to build an ensemble distribution per city per target date
+    4. If feasible: wrap in a Vertex AI custom job triggered daily; store member arrays in BQ
+       `gencast_forecasts` — same schema as `ecmwf_forecasts`
+  - **Blocker:** needs a GPU budget decision and a feasibility spike before committing to build
+
+---
+
 ### Market Edge UI — Multi-Source Support
 
 - [ ] **[Market Edge] Add source selector to market-edge comparison UI**
@@ -173,11 +217,12 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
     static list in JS (same pattern as CITIES const). Initially: Open-Meteo GFS, ECMWF IFS.
     Add new entries as each ingest job ships.
   - **Table columns per source type:**
-    - *Ensemble source* (Open-Meteo GFS, ECMWF, Tomorrow.io if probabilistic): show
+    - *Ensemble source* (Open-Meteo GFS, ECMWF IFS, ECMWF AIFS, ICON, GenCast if built): show
       Members%, Members count, Raw Edge, ROI, Fit%, Fit Edge, Fit ROI — current full layout.
-    - *Deterministic source* (Pirate Weather, OWM, Tomorrow.io if deterministic-only): hide
-      Members% and Members columns (show "—"); show only Fit%, Fit Edge, Fit ROI.
-      Use calibrated σ (from `source_calibration` table) or fixed σ = 2.5°C fallback.
+    - *Deterministic source* (Pirate Weather, OWM): these sources show a "Predicted High" column
+      only (the point estimate + fetch time). No Members%, no edge/ROI columns. They serve as a
+      reference data point alongside the ensemble sources, not as a betting signal themselves.
+    - *Tomorrow.io*: same as deterministic until/unless paid probabilistic tier is verified.
   - **API routing:** each source maps to its own backend endpoint
     (`/nbm-forecasts`, `/ecmwf-forecasts`, `/tomorrow-forecasts`, `/pirate-forecasts`, `/owm-forecasts`).
     The `loadComparison()` function picks the endpoint based on the selected model.
