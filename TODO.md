@@ -53,6 +53,100 @@ Last updated: 2026-03-31 (session 9)
 
 ---
 
+### Infrastructure / Cost Reduction
+
+- [ ] **[Infra] Migrate container images from Artifact Registry to GitHub Container Registry (ghcr.io)**
+  - Artifact Registry charges $0.10/GB/month storage. For a project with several Cloud Run jobs
+    (weather-api, weather-nbm, weather-ecmwf, weather-polymarket, weather-sync) this adds up.
+  - **Recommended target: ghcr.io** (GitHub Container Registry) — free for public repos, already
+    authenticated via `GITHUB_TOKEN` in Actions (no extra secret needed), and the repos are already
+    on GitHub. Better choice than Docker Hub whose free tier now limits to 1 private repo.
+  - **Changes needed (all in `cloud-predict-analytics` repo):**
+    1. `.github/workflows/build.yml` — change `docker build` push target from
+       `us-central1-docker.pkg.dev/fg-polylabs/...` to `ghcr.io/fg-polylabs/...`
+    2. Add `packages: write` permission to the workflow job
+    3. Login step: `docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}`
+    4. Update all Cloud Run deploy steps to reference the new `ghcr.io/...` image URL
+    5. After confirming deploys work, delete the Artifact Registry repository in GCP console
+  - Images can be public (fine for open-source jobs) or private (requires org-level package settings)
+  - One-time migration; no ongoing code changes after the workflow is updated
+
+- [ ] **[Infra] Homeserver-first scheduled jobs with Cloud Run as fallback**
+  - **Goal:** Run weather ingest jobs (weather-nbm, weather-ecmwf, weather-polymarket, weather-sync,
+    and future jobs) on a self-hosted Proxmox node as the primary runner. Cloud Run runs slightly
+    later as a watchdog — if the homeserver job already succeeded, Cloud Run exits immediately
+    (minimal cost: a single BQ query). If the homeserver was down or failed, Cloud Run runs the
+    full job.
+  - **Heartbeat pattern:**
+    1. Homeserver job runs at the scheduled time (e.g., weather-polymarket at 01:00 UTC)
+    2. On successful completion, job writes a record to a new BQ table `job_heartbeats`:
+       `job_name STRING, run_at TIMESTAMP, status STRING ('success'|'failed'), rows_written INT64,
+       runner STRING ('homeserver'|'cloud-run')`
+    3. Cloud Run job runs 30 minutes later (e.g., 01:30 UTC)
+    4. Cloud Run job queries `job_heartbeats` first: if a `success` record exists for this
+       `job_name` where `run_at > TIMESTAMP_SUB(NOW(), INTERVAL 2 HOUR)`, exit 0 — done.
+    5. If no recent success found: run the full job, write a heartbeat with `runner='cloud-run'`
+  - **Homeserver setup:**
+    - Run the same Go binaries (or Docker containers using the same image) via systemd timers
+      or cron inside a Proxmox LXC container
+    - Binaries need GCP credentials: use a service account JSON key or Workload Identity
+      Federation via OIDC (preferred — no long-lived keys). Store credentials in the LXC.
+    - Same env vars as Cloud Run (`BQ_PROJECT`, `BQ_DATASET`, etc.) set in the systemd unit file
+    - Schedule homeserver jobs 30 minutes before the Cloud Run schedule as the primary window
+  - **Cloud Run changes:** Add a `--check-heartbeat` flag (or auto-detect via env var
+    `HEARTBEAT_CHECK=true`) to each job's `main.go` that performs the BQ check before doing any work
+  - **Cost impact:** Cloud Run jobs that exit after a BQ query (~1–2 seconds) cost essentially
+    nothing. Normal Cloud Run costs only incur when the homeserver is down.
+  - **Failure alerting:** if `runner='cloud-run'` appears in `job_heartbeats` on a day when
+    it should have been `runner='homeserver'`, surface a warning in the admin UI health check
+
+- [ ] **[Infra] Homelab-primary API routing via Cloudflare Workers + Tunnel**
+  - **Goal:** Route `weather-api` traffic to a self-hosted instance on the homelab as primary,
+    with Cloud Run as automatic fallback. Zero-downtime failover; no user-visible change.
+  - **Why not Cloudflare Load Balancer:** it costs $5+/month per hostname — not worth it for
+    a low-traffic internal API.
+  - **Free architecture using Cloudflare Workers + Tunnel:**
+    ```
+    Client → api.yourdomain.com
+           → Cloudflare Worker (free: 100K req/day)
+               ├─ try: homelab via Cloudflare Tunnel (outbound-only, no open ports needed)
+               │        cloudflared daemon runs on Proxmox node, exposes Go API on :8080
+               └─ on timeout/error: fallback to Cloud Run URL
+    ```
+  - **Worker logic (simple):**
+    ```js
+    const HOMELAB = 'https://weather-api-home.yourdomain.com'; // Tunnel hostname
+    const CLOUD_RUN = 'https://weather-api-xxx-uc.a.run.app';
+    export default {
+      async fetch(request) {
+        try {
+          const resp = await fetch(HOMELAB + new URL(request.url).pathname + ...,
+            { signal: AbortSignal.timeout(3000) }); // 3s timeout
+          if (resp.ok || resp.status < 500) return resp;
+        } catch (_) {}
+        return fetch(CLOUD_RUN + ...); // fallback
+      }
+    }
+    ```
+  - **Cloudflare Tunnel setup (free):**
+    1. Install `cloudflared` on Proxmox node
+    2. `cloudflared tunnel create weather-api-home`
+    3. Configure to expose the Go API HTTP port
+    4. Assign a hostname (e.g., `weather-api-home.yourdomain.com`) in Zero Trust dashboard
+    5. No inbound firewall ports needed — tunnel is outbound-only
+  - **Homelab API instance:** same binary as Cloud Run (`weather-api`), same env vars,
+    run via systemd in a Proxmox LXC. Needs GCP credentials for BQ access (service account key
+    or Workload Identity). No Cloud Run-specific config changes needed.
+  - **DNS:** point `api.yourdomain.com` CNAME to the Cloudflare Worker route (not directly to
+    Cloud Run). Worker handles the primary/fallback logic transparently.
+  - **100K req/day Workers free tier** is well above expected traffic for this project.
+    If traffic grows, Workers Paid is $5/month for 10M requests — still cheaper than always-on Cloud Run.
+  - **Cost impact:** Cloud Run scales to zero when homelab is healthy. Cloud Run only runs when
+    homelab is down or overloaded. Firebase Auth validation still happens in the API binary
+    regardless of which runner is serving the request.
+
+---
+
 ### Forecast Model Expansion
 
 **Design principle:** Ingest jobs store raw API/GRIB output only. Derived stats (mean, std dev,
