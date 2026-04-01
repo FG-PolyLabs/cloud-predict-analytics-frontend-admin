@@ -24,9 +24,21 @@
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/nbm-forecasts/" }} active{{ end }}"
-             href="{{ "nbm-forecasts/" | relURL }}" title="Admin access required">
-            <i class="bi bi-thermometer-half me-1"></i>NBM
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/open-meteo-forecasts/" }} active{{ end }}"
+             href="{{ "open-meteo-forecasts/" | relURL }}" title="Admin access required">
+            <i class="bi bi-thermometer-half me-1"></i>Open-Meteo
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/ecmwf-forecasts/" }} active{{ end }}"
+             href="{{ "ecmwf-forecasts/" | relURL }}" title="Admin access required">
+            <i class="bi bi-thermometer me-1"></i>ECMWF
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link nav-admin-only" href="https://fg-polylabs.github.io/cloud-predict-analytics-market-edge/"
+             target="_blank" rel="noopener" title="Open-Meteo ensemble vs Polymarket comparison">
+            <i class="bi bi-graph-up-arrow me-1"></i>Market Edge <i class="bi bi-box-arrow-up-right ms-1" style="font-size:.7em"></i>
           </a>
         </li>
         <li class="nav-item">
@@ -90,6 +102,17 @@
         <div class="fw-medium small">cloud-predict-analytics-data</div>
         <div class="text-muted" style="font-size:.8rem">Static JSONL data files written by <code>weather-sync</code>. Also hosts the public (non-admin) frontend.</div>
       </a>
+      <a href="https://github.com/FG-PolyLabs/cloud-predict-analytics-market-edge"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">cloud-predict-analytics-market-edge</div>
+          <a href="https://fg-polylabs.github.io/cloud-predict-analytics-market-edge/" target="_blank" rel="noopener"
+             class="badge bg-success-subtle text-success border border-success-subtle text-decoration-none" style="font-size:.7rem">
+            Live <i class="bi bi-box-arrow-up-right"></i>
+          </a>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Open-Meteo ensemble vs Polymarket comparison UI. Auth-gated; same Firebase + ALLOWED_EMAILS as admin.</div>
+      </a>
     </div>
 
     <!-- Cloud Run -->
@@ -122,6 +145,14 @@
           <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
         </div>
         <div class="text-muted" style="font-size:.8rem">Exports <code>tracked_cities</code> and <code>polymarket_snapshots</code> from BigQuery to GCS and GitHub. Runs daily at 03:00 UTC.</div>
+      </a>
+      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-ecmwf/overview?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">weather-ecmwf</div>
+          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Fetches ECMWF IFS ensemble forecasts (51 members) from Open-Meteo and writes raw member arrays to BigQuery. Runs daily at 00:45 UTC.</div>
       </a>
     </div>
 
@@ -163,7 +194,7 @@
       <a href="https://console.cloud.google.com/bigquery?project=fg-polylabs&ws=!1m4!1m3!3m2!1sfg-polylabs!2sweather"
          target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
         <div class="fw-medium small">fg-polylabs · weather</div>
-        <div class="text-muted" style="font-size:.8rem">Source of truth. Contains <code>tracked_cities</code> and <code>polymarket_snapshots</code>. All API reads and writes go here.</div>
+        <div class="text-muted" style="font-size:.8rem">Source of truth. Contains <code>tracked_cities</code>, <code>polymarket_snapshots</code>, <code>nbm_forecasts</code>, and <code>ecmwf_forecasts</code>.</div>
       </a>
     </div>
 
