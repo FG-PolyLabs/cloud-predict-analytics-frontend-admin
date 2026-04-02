@@ -18,7 +18,7 @@ FutureGadgetLabs/
 | Repo | GitHub | Role |
 |------|--------|------|
 | `cloud-predict-analytics-frontend-admin` | https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin | Admin-only UI; authenticated CRUD via backend API; reads JSONL from data repo or GCS |
-| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Three parts: (1) Cloud Run API service (`weather-api`) for all mutations; (2) Cloud Run job (`weather-polymarket`) that fetches Polymarket data daily; (3) Cloud Run job (`weather-sync`) that exports BigQuery → GCS + GitHub |
+| `cloud-predict-analytics` | https://github.com/FG-PolyLabs/cloud-predict-analytics | Cloud Run API service (`weather-api`) for all mutations; Cloud Run jobs: `weather-polymarket` (Polymarket prices), `weather-meteo-gfs` (GFS ensemble), `weather-meteo-ecmwf` (ECMWF ensemble), `weather-meteo-icon` (ICON ensemble), `weather-sync` (BQ → GCS + GitHub export) |
 | `cloud-predict-analytics-data` | https://github.com/FG-PolyLabs/cloud-predict-analytics-data | JSONL data files written by `weather-sync`; also hosts the public (non-admin) frontend |
 
 ### First-Time Setup
@@ -48,8 +48,11 @@ bash scripts/setup.sh
 |----------|---------|
 | GCP Project | `fg-polylabs` |
 | Cloud Run API | `weather-api` — `us-central1` |
-| Cloud Run Job | `weather-polymarket` — `us-central1`, runs daily at 01:00 UTC |
+| Cloud Run Job | `weather-polymarket` — `us-central1`, runs at 04:05, 10:05, 16:05, 22:05 UTC |
 | Cloud Run Job | `weather-sync` — `us-central1`, runs daily at 03:00 UTC; exports BQ → GCS + GitHub |
+| Cloud Run Job | `weather-meteo-gfs` — `us-central1`, runs at 04:00, 10:00, 16:00, 22:00 UTC |
+| Cloud Run Job | `weather-meteo-ecmwf` — `us-central1`, runs at 04:30, 16:30 UTC |
+| Cloud Run Job | `weather-meteo-icon` — `us-central1`, runs at 00:05, 06:05, 12:05, 18:05 UTC |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
 | GCS Bucket | `fg-polylabs-weather-data` in `fg-polylabs`; data files under `data/` prefix |
 | Firebase Project | `collection-showcase-auth` |
@@ -71,10 +74,15 @@ bash scripts/setup.sh
 | `content/debug/_index.md` | Debug section |
 | `themes/admin/layouts/tracked-cities/list.html` | Cities CRUD — list, add, edit, delete; source cascade + sync |
 | `themes/admin/layouts/snapshots/list.html` | Snapshots — Chart.js line chart + table toggle; date range; backfill modal |
-| `themes/admin/layouts/nbm-forecasts/list.html` | NBM forecasts — line chart with ±1σ/p10–p90 bands; inline ensemble distribution chart (1°C bins, threshold query); table view |
+| `themes/admin/layouts/meteo-gfs-forecasts/list.html` | GFS forecasts — line chart with ±1σ/p10–p90 bands; inline ensemble distribution chart (1°C bins, threshold query); table view |
+| `themes/admin/layouts/meteo-ecmwf-forecasts/list.html` | ECMWF forecasts — same layout as GFS; uses `/meteo-ecmwf-forecasts` API |
+| `themes/admin/layouts/meteo-icon-forecasts/list.html` | ICON forecasts — same layout as GFS/ECMWF; uses `/meteo-icon-forecasts` API |
 | `themes/admin/layouts/debug/list.html` | Debug page — config, auth state, connectivity checks, token viewer |
 | `.env.example` | Template for all environment variables |
 | `scripts/setup.sh` | Clones sibling repos if not already present |
+| `mcp/bq_server.py` | Local MCP server — exposes `list_tables`, `get_schema`, and `query` tools for read-only BigQuery access to the `fg-polylabs.weather` dataset |
+| `mcp/requirements.txt` | Python deps for the MCP server (`mcp[cli]`, `google-cloud-bigquery`) |
+| `.claude/settings.json` | Registers the MCP server so it auto-starts with every Claude Code session |
 
 ### Auth Flow
 
