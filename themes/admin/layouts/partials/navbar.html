@@ -24,15 +24,21 @@
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/open-meteo-forecasts/" }} active{{ end }}"
-             href="{{ "open-meteo-forecasts/" | relURL }}" title="Admin access required">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/meteo-gfs-forecasts/" }} active{{ end }}"
+             href="{{ "meteo-gfs-forecasts/" | relURL }}" title="Admin access required">
             <i class="bi bi-thermometer-half me-1"></i>Open-Meteo
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/ecmwf-forecasts/" }} active{{ end }}"
-             href="{{ "ecmwf-forecasts/" | relURL }}" title="Admin access required">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/meteo-ecmwf-forecasts/" }} active{{ end }}"
+             href="{{ "meteo-ecmwf-forecasts/" | relURL }}" title="Admin access required">
             <i class="bi bi-thermometer me-1"></i>ECMWF
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/meteo-icon-forecasts/" }} active{{ end }}"
+             href="{{ "meteo-icon-forecasts/" | relURL }}" title="Admin access required">
+            <i class="bi bi-thermometer-sun me-1"></i>ICON
           </a>
         </li>
         <li class="nav-item">
@@ -146,13 +152,21 @@
         </div>
         <div class="text-muted" style="font-size:.8rem">Exports <code>tracked_cities</code> and <code>polymarket_snapshots</code> from BigQuery to GCS and GitHub. Runs daily at 03:00 UTC.</div>
       </a>
-      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-ecmwf/overview?project=fg-polylabs"
+      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-meteo-ecmwf/overview?project=fg-polylabs"
          target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
         <div class="d-flex align-items-center gap-2">
-          <div class="fw-medium small">weather-ecmwf</div>
+          <div class="fw-medium small">weather-meteo-ecmwf</div>
           <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
         </div>
-        <div class="text-muted" style="font-size:.8rem">Fetches ECMWF IFS ensemble forecasts (51 members) from Open-Meteo and writes raw member arrays to BigQuery. Runs daily at 00:45 UTC.</div>
+        <div class="text-muted" style="font-size:.8rem">Fetches ECMWF IFS ensemble forecasts from Open-Meteo and writes to BigQuery (meteo_ecmwf_forecasts). Runs at 04:30 and 16:30 UTC.</div>
+      </a>
+      <a href="https://console.cloud.google.com/run/jobs/details/us-central1/weather-meteo-icon/overview?project=fg-polylabs"
+         target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="fw-medium small">weather-meteo-icon</div>
+          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:.7rem">Job</span>
+        </div>
+        <div class="text-muted" style="font-size:.8rem">Fetches DWD ICON seamless ensemble forecasts from Open-Meteo and writes to BigQuery (meteo_icon_forecasts). Runs at 00:05, 06:05, 12:05, 18:05 UTC.</div>
       </a>
     </div>
 
@@ -194,7 +208,7 @@
       <a href="https://console.cloud.google.com/bigquery?project=fg-polylabs&ws=!1m4!1m3!3m2!1sfg-polylabs!2sweather"
          target="_blank" rel="noopener" class="list-group-item list-group-item-action px-3 py-2">
         <div class="fw-medium small">fg-polylabs · weather</div>
-        <div class="text-muted" style="font-size:.8rem">Source of truth. Contains <code>tracked_cities</code>, <code>polymarket_snapshots</code>, <code>nbm_forecasts</code>, and <code>ecmwf_forecasts</code>.</div>
+        <div class="text-muted" style="font-size:.8rem">Source of truth. Contains <code>tracked_cities</code>, <code>polymarket_snapshots</code>, <code>meteo_gfs_forecasts</code>, <code>meteo_ecmwf_forecasts</code>, and <code>meteo_icon_forecasts</code>.</div>
       </a>
     </div>
 
