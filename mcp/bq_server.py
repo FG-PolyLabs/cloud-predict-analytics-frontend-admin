@@ -56,6 +56,18 @@ TABLES = {
         "tmax_p10_c, tmax_p25_c, tmax_p50_c, tmax_p75_c, tmax_p90_c, model, model_run_at, "
         "actual_max_temp_c, error_c."
     ),
+    "tomorrow_forecasts": (
+        "Tomorrow.io deterministic daily max temperature forecasts (2 runs/day, all cities). "
+        "Point estimate only — no ensemble spread. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_c, model, model_run_at, "
+        "actual_max_temp_c, error_c."
+    ),
+    "pirate_weather_forecasts": (
+        "Pirate Weather deterministic daily high temperature forecasts (2 runs/day, all cities). "
+        "Uses temperatureHigh (6am-6pm daytime high). Point estimate only — no ensemble spread. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_c, tmin_c, precip_prob, "
+        "model, model_run_at, actual_max_temp_c, error_c."
+    ),
 }
 
 _DML = re.compile(
@@ -89,7 +101,7 @@ def get_schema(table_name: str) -> str:
     Return the schema (column names, types, row count) for a table.
 
     Args:
-        table_name: tracked_cities | polymarket_snapshots | meteo_gfs_forecasts | meteo_ecmwf_forecasts | meteo_icon_forecasts | nbm_noaa_forecasts
+        table_name: tracked_cities | polymarket_snapshots | meteo_gfs_forecasts | meteo_ecmwf_forecasts | meteo_icon_forecasts | nbm_noaa_forecasts | tomorrow_forecasts | pirate_weather_forecasts
     """
     if table_name not in TABLES:
         return f"Unknown table '{table_name}'. Available: {', '.join(TABLES)}"
