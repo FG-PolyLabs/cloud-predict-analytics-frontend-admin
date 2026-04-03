@@ -2,12 +2,20 @@
 """
 bq_server.py — MCP server for querying the fg-polylabs BigQuery weather dataset.
 
-Tables:
+Tables (13 total):
   fg-polylabs.weather.tracked_cities
   fg-polylabs.weather.polymarket_snapshots
   fg-polylabs.weather.meteo_gfs_forecasts
   fg-polylabs.weather.meteo_ecmwf_forecasts
   fg-polylabs.weather.meteo_icon_forecasts
+  fg-polylabs.weather.meteo_gem_forecasts
+  fg-polylabs.weather.meteo_aifs_forecasts
+  fg-polylabs.weather.nbm_noaa_forecasts
+  fg-polylabs.weather.tomorrow_forecasts
+  fg-polylabs.weather.pirate_weather_forecasts
+  fg-polylabs.weather.nws_forecasts
+  fg-polylabs.weather.open_meteo_det_forecasts
+  fg-polylabs.weather.wunderground_forecasts
 
 Auth: Application Default Credentials — run `gcloud auth application-default login` once.
 """
@@ -68,6 +76,36 @@ TABLES = {
         "Fields: city, target_date, forecast_date, lead_days, tmax_c, tmin_c, precip_prob, "
         "model, model_run_at, actual_max_temp_c, error_c."
     ),
+    "meteo_gem_forecasts": (
+        "Open-Meteo Canadian GEM Global ensemble weather forecasts (2 runs/day: 00z/12z, 21 members). "
+        "Fields: city, target_date, forecast_date, lead_days, predicted_max_temp_c, "
+        "temp_std_dev_c, skewness, p10_temp_c, p90_temp_c, member_count, member_temps, "
+        "model, model_run_at, actual_max_temp_c, error_c."
+    ),
+    "meteo_aifs_forecasts": (
+        "Open-Meteo ECMWF AIFS (AI-based) ensemble weather forecasts (4 runs/day: 00z/06z/12z/18z, ~51 members). "
+        "Fields: city, target_date, forecast_date, lead_days, predicted_max_temp_c, "
+        "temp_std_dev_c, skewness, p10_temp_c, p90_temp_c, member_count, member_temps, "
+        "model, model_run_at, actual_max_temp_c, error_c."
+    ),
+    "nws_forecasts": (
+        "Weather.gov (NWS) deterministic daily high temperature forecasts (2 runs/day, US cities only: chicago, dallas, miami, nyc). "
+        "No API key required. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_c, model, model_run_at, "
+        "actual_max_temp_c, error_c."
+    ),
+    "open_meteo_det_forecasts": (
+        "Open-Meteo best-match deterministic daily high temperature forecasts (2 runs/day, all cities). "
+        "No API key required. Blends multiple NWP models for best local estimate. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_c, model, model_run_at, "
+        "actual_max_temp_c, error_c."
+    ),
+    "wunderground_forecasts": (
+        "Weather Underground daily high temperature forecasts (4 runs/day, all cities). "
+        "IMPORTANT: This is the Polymarket settlement source — WU is what markets resolve against. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_c, model, model_run_at, "
+        "actual_max_temp_c, error_c."
+    ),
 }
 
 _DML = re.compile(
@@ -101,7 +139,7 @@ def get_schema(table_name: str) -> str:
     Return the schema (column names, types, row count) for a table.
 
     Args:
-        table_name: tracked_cities | polymarket_snapshots | meteo_gfs_forecasts | meteo_ecmwf_forecasts | meteo_icon_forecasts | nbm_noaa_forecasts | tomorrow_forecasts | pirate_weather_forecasts
+        table_name: One of: tracked_cities, polymarket_snapshots, meteo_gfs_forecasts, meteo_ecmwf_forecasts, meteo_icon_forecasts, meteo_gem_forecasts, meteo_aifs_forecasts, nbm_noaa_forecasts, tomorrow_forecasts, pirate_weather_forecasts, nws_forecasts, open_meteo_det_forecasts, wunderground_forecasts
     """
     if table_name not in TABLES:
         return f"Unknown table '{table_name}'. Available: {', '.join(TABLES)}"

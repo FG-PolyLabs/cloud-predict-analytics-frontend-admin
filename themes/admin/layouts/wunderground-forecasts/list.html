@@ -1,0 +1,184 @@
+{{ define "main" }}
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+  <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+</div>
+<div class="alert alert-secondary py-2 small mb-3">
+  <i class="bi bi-info-circle me-1"></i><strong>Settlement source</strong> &mdash; Polymarket resolves against Weather Underground.
+</div>
+
+<div id="auth-guard" class="alert alert-warning d-none">
+  <i class="bi bi-lock me-1"></i>You must be <a href="{{ "" | relURL }}">signed in</a> to view forecasts.
+</div>
+
+<!-- Filters -->
+<div class="card shadow-sm border-0 mb-3" id="filters-card" style="display:none!important">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
+        <select class="form-select form-select-sm" id="filter-city" style="min-width:160px">
+          <option value="">All cities</option>
+        </select>
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-forecast-date">
+          Forecast Date <span class="text-muted fw-normal">(date fetched)</span>
+        </label>
+        <input type="date" class="form-control form-control-sm" id="filter-forecast-date">
+      </div>
+      <div class="col-sm-auto">
+        <button class="btn btn-primary btn-sm" onclick="loadForecasts()"><i class="bi bi-search me-1"></i>Query</button>
+      </div>
+      <div class="col-sm-auto ms-auto">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" role="switch" id="view-toggle" checked onchange="toggleView()">
+          <label class="form-check-label small" for="view-toggle" id="view-toggle-label">Chart</label>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="text-center py-5 d-none"><div class="spinner-border text-primary" role="status"></div></div>
+<div id="empty-state" class="text-center py-5 d-none"><i class="bi bi-inbox fs-1 text-muted"></i><p class="text-muted mt-2">No forecasts found.</p></div>
+
+<div class="card shadow-sm border-0 d-none mb-3" id="chart-card">
+  <div class="card-header bg-transparent border-bottom-0 pt-3 pb-0">
+    <p class="text-muted small mb-0">Predicted daily high temperature. <span id="chart-subtitle"></span></p>
+  </div>
+  <div class="card-body"><canvas id="wu-chart" style="max-height:480px"></canvas></div>
+</div>
+
+<div class="card shadow-sm border-0 d-none" id="table-card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-light"><tr>
+          <th class="ps-3">City</th><th>Target Date</th><th>Lead Days</th><th>Predicted High</th><th>Actual</th><th>Error</th>
+        </tr></thead>
+        <tbody id="wu-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{ end }}
+
+{{ define "page-scripts" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+  let mainChart = null, lastRows = [], chartMode = true;
+  const CITY_COLORS = ['#0d6efd','#dc3545','#198754','#fd7e14','#6f42c1','#20c997','#ffc107','#0dcaf0','#6610f2','#d63384','#adb5bd','#495057'];
+
+  firebase.auth().onAuthStateChanged(async user => {
+    if (!user) { document.getElementById('filters-card').style.removeProperty('display'); document.getElementById('filters-card').classList.add('d-none'); document.getElementById('auth-guard').classList.remove('d-none'); return; }
+    document.getElementById('filters-card').style.removeProperty('display');
+    document.getElementById('filter-forecast-date').value = new Date().toISOString().slice(0,10);
+    await loadForecasts();
+  });
+
+  function toggleView() {
+    chartMode = document.getElementById('view-toggle').checked;
+    document.getElementById('view-toggle-label').textContent = chartMode ? 'Chart' : 'Table';
+    if (!lastRows.length) return;
+    document.getElementById('chart-card').classList.toggle('d-none', !chartMode);
+    document.getElementById('table-card').classList.toggle('d-none', chartMode);
+  }
+
+  async function loadForecasts() {
+    const city = document.getElementById('filter-city').value;
+    const forecastDate = document.getElementById('filter-forecast-date').value;
+    const loadingEl = document.getElementById('loading'), emptyEl = document.getElementById('empty-state');
+    const chartCard = document.getElementById('chart-card'), tableCard = document.getElementById('table-card');
+    loadingEl.classList.remove('d-none'); emptyEl.classList.add('d-none'); chartCard.classList.add('d-none'); tableCard.classList.add('d-none');
+    try {
+      const params = {};
+      if (city) params.city = city;
+      if (forecastDate) params.forecast_date = forecastDate;
+      const rows = await api('GET', '/wunderground-forecasts' + qs(params));
+      loadingEl.classList.add('d-none');
+      if (!rows || !rows.length) { emptyEl.classList.remove('d-none'); return; }
+      lastRows = rows;
+      const sel = document.getElementById('filter-city');
+      if (sel.options.length <= 1) {
+        const cities = [...new Set(rows.map(r => r.city))].sort();
+        cities.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+      }
+      renderChart(rows); renderTable(rows);
+      chartCard.classList.toggle('d-none', !chartMode); tableCard.classList.toggle('d-none', chartMode);
+    } catch (e) { loadingEl.classList.add('d-none'); showToast('Query failed: ' + e.message, 'danger'); }
+  }
+
+  function renderChart(rows) {
+    const byCityMap = {};
+    rows.forEach(r => { if (!byCityMap[r.city]) byCityMap[r.city] = []; byCityMap[r.city].push(r); });
+    const cities = Object.keys(byCityMap).sort();
+    const multiCity = cities.length > 1;
+
+    const subtitle = document.getElementById('chart-subtitle');
+    subtitle.textContent = multiCity ? 'Select a single city for predicted vs actual comparison.' : '';
+
+    const datasets = [];
+    cities.forEach((city, ci) => {
+      const cityRows = byCityMap[city].sort((a, b) => a.target_date < b.target_date ? -1 : 1);
+      const color = CITY_COLORS[ci % CITY_COLORS.length];
+
+      datasets.push({
+        label: multiCity ? city : 'Predicted High',
+        data: cityRows.map(r => ({ x: r.target_date, y: r.tmax_c })),
+        borderColor: color, backgroundColor: 'transparent',
+        borderWidth: 2.5, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, order: 1,
+      });
+
+      const hasActuals = cityRows.some(r => r.actual_max_temp_c != null);
+      if (hasActuals) {
+        datasets.push({
+          label: multiCity ? `${city} actual` : 'Actual High',
+          data: cityRows.filter(r => r.actual_max_temp_c != null).map(r => ({ x: r.target_date, y: r.actual_max_temp_c })),
+          borderColor: color, backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [5, 4], pointRadius: 4, tension: 0.3, order: 1,
+        });
+      }
+    });
+
+    if (mainChart) mainChart.destroy();
+    mainChart = new Chart(document.getElementById('wu-chart'), {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}\u00b0C` },
+          },
+        },
+        scales: {
+          x: { type: 'time', time: { unit: 'day', tooltipFormat: 'MMM d', displayFormats: { day: 'MMM d' } }, title: { display: true, text: 'Target Date' } },
+          y: { title: { display: true, text: 'Temperature (\u00b0C)' }, ticks: { callback: v => v + '\u00b0C' } },
+        },
+      },
+    });
+  }
+
+  function renderTable(rows) {
+    const tbody = document.getElementById('wu-tbody');
+    tbody.innerHTML = rows.map(r => {
+      const errorCell = r.error_c != null
+        ? `<span class="${r.error_c > 0 ? 'text-danger' : 'text-primary'}">${r.error_c > 0 ? '+' : ''}${r.error_c.toFixed(1)}\u00b0C</span>`
+        : '<span class="text-muted">\u2014</span>';
+      return `<tr>
+        <td class="ps-3 fw-medium">${escHtml(r.city)}</td>
+        <td>${escHtml(r.target_date)}</td>
+        <td class="text-center">${r.lead_days}</td>
+        <td>${r.tmax_c.toFixed(1)}\u00b0C</td>
+        <td>${r.actual_max_temp_c != null ? r.actual_max_temp_c.toFixed(1) + '\u00b0C' : '<span class="text-muted">\u2014</span>'}</td>
+        <td>${errorCell}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function escHtml(str) { const d = document.createElement('div'); d.appendChild(document.createTextNode(String(str))); return d.innerHTML; }
+</script>
+{{ end }}

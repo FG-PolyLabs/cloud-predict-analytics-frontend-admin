@@ -1,0 +1,3 @@
+---
+title: Pirate Weather Forecasts
+---

@@ -48,11 +48,20 @@ bash scripts/setup.sh
 |----------|---------|
 | GCP Project | `fg-polylabs` |
 | Cloud Run API | `weather-api` — `us-central1` |
-| Cloud Run Job | `weather-polymarket` — `us-central1`, runs at 04:05, 10:05, 16:05, 22:05 UTC |
-| Cloud Run Job | `weather-sync` — `us-central1`, runs daily at 03:00 UTC; exports BQ → GCS + GitHub |
-| Cloud Run Job | `weather-meteo-gfs` — `us-central1`, runs at 04:00, 10:00, 16:00, 22:00 UTC |
-| Cloud Run Job | `weather-meteo-ecmwf` — `us-central1`, runs at 04:30, 16:30 UTC |
-| Cloud Run Job | `weather-meteo-icon` — `us-central1`, runs at 00:05, 06:05, 12:05, 18:05 UTC |
+| Cloud Run Job | `weather-polymarket` — runs at 04:05, 10:05, 16:05, 22:05 UTC |
+| Cloud Run Job | `weather-sync` — runs daily at 05:00 UTC; exports BQ → GCS + GitHub |
+| Cloud Run Job | `weather-meteo-gfs` — GFS ensemble, 4x/day at 04:00, 10:00, 16:00, 22:00 UTC |
+| Cloud Run Job | `weather-meteo-ecmwf` — ECMWF IFS ensemble, 2x/day at 04:30, 16:30 UTC |
+| Cloud Run Job | `weather-meteo-icon` — ICON ensemble, 4x/day at 00:05, 06:05, 12:05, 18:05 UTC |
+| Cloud Run Job | `weather-meteo-gem` — GEM Global ensemble, 2x/day at 01:11, 13:11 UTC |
+| Cloud Run Job | `weather-meteo-aifs` — ECMWF AIFS (AI) ensemble, 4x/day |
+| Cloud Run Job | `weather-nbm-noaa` — NOAA NBM (Python, US only), daily at 04:03 UTC |
+| Cloud Run Job | `weather-tomorrow` — Tomorrow.io deterministic, 2x/day |
+| Cloud Run Job | `weather-pirate` — Pirate Weather deterministic, 2x/day |
+| Cloud Run Job | `weather-nws` — NWS deterministic (US only), 2x/day |
+| Cloud Run Job | `weather-meteo-forecast` — Open-Meteo deterministic, 2x/day |
+| Cloud Run Job | `weather-wunderground` — Weather Underground (settlement source), 4x/day |
+| Docker Hub | Images: `philwin/cloud-predict-analytics`, `philwin/cloud-predict-analytics-nbm-noaa` |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
 | GCS Bucket | `fg-polylabs-weather-data` in `fg-polylabs`; data files under `data/` prefix |
 | Firebase Project | `collection-showcase-auth` |
@@ -74,9 +83,17 @@ bash scripts/setup.sh
 | `content/debug/_index.md` | Debug section |
 | `themes/admin/layouts/tracked-cities/list.html` | Cities CRUD — list, add, edit, delete; source cascade + sync |
 | `themes/admin/layouts/snapshots/list.html` | Snapshots — Chart.js line chart + table toggle; date range; backfill modal |
-| `themes/admin/layouts/meteo-gfs-forecasts/list.html` | GFS forecasts — line chart with ±1σ/p10–p90 bands; inline ensemble distribution chart (1°C bins, threshold query); table view |
-| `themes/admin/layouts/meteo-ecmwf-forecasts/list.html` | ECMWF forecasts — same layout as GFS; uses `/meteo-ecmwf-forecasts` API |
-| `themes/admin/layouts/meteo-icon-forecasts/list.html` | ICON forecasts — same layout as GFS/ECMWF; uses `/meteo-icon-forecasts` API |
+| `themes/admin/layouts/meteo-gfs-forecasts/list.html` | GFS ensemble — chart + table + distribution modal |
+| `themes/admin/layouts/meteo-ecmwf-forecasts/list.html` | ECMWF IFS ensemble — same layout |
+| `themes/admin/layouts/meteo-icon-forecasts/list.html` | ICON ensemble — same layout |
+| `themes/admin/layouts/meteo-gem-forecasts/list.html` | GEM Global ensemble — same layout |
+| `themes/admin/layouts/meteo-aifs-forecasts/list.html` | ECMWF AIFS ensemble — same layout |
+| `themes/admin/layouts/nbm-noaa-forecasts/list.html` | NOAA NBM (US only) — mean + σ + percentile bands |
+| `themes/admin/layouts/tomorrow-forecasts/list.html` | Tomorrow.io deterministic — chart + table |
+| `themes/admin/layouts/pirate-weather-forecasts/list.html` | Pirate Weather deterministic — chart + table |
+| `themes/admin/layouts/nws-forecasts/list.html` | NWS deterministic (US only) — chart + table |
+| `themes/admin/layouts/open-meteo-det-forecasts/list.html` | Open-Meteo deterministic — chart + table |
+| `themes/admin/layouts/wunderground-forecasts/list.html` | Weather Underground (settlement source) — chart + table |
 | `themes/admin/layouts/debug/list.html` | Debug page — config, auth state, connectivity checks, token viewer |
 | `.env.example` | Template for all environment variables |
 | `scripts/setup.sh` | Clones sibling repos if not already present |
