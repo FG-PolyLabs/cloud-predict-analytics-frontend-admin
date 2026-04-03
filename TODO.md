@@ -3,11 +3,81 @@
 Shared task list across all three repos. Update this file as work progresses.
 Claude should read this at the start of each session to pick up context.
 
-Last updated: 2026-03-31 (session 9)
+Last updated: 2026-04-03 (session 12)
 
 ---
 
-## In Progress (session 9)
+## In Progress (session 12)
+
+- [x] **ICON ensemble via Open-Meteo — full pipeline** ✓ 2026-04-02
+  - `cmd/meteo-icon/main.go`, `internal/api/icon.go`, Cloud Run job + scheduler (4x/day at 00:05/06:05/12:05/18:05 UTC)
+  - Admin page: `content/meteo-icon-forecasts/` with chart + table + distribution modal
+  - Market Edge: ICON run selector, 8 new columns (Members%, Count, Temps, Edge, ROI, Fit%, Fit Edge, Fit ROI)
+
+- [x] **NOAA NBM daily max temperature pipeline** ✓ 2026-04-03
+  - Python Cloud Run job `cmd/nbm-noaa/` — fetches GRIB2 from AWS S3, extracts TMAX mean + std dev via cfgrib/xarray
+  - Derives p10/p25/p50/p75/p90 from normal distribution (NBM has no raw members)
+  - US-only: chicago, dallas, miami, nyc. Scheduler daily at 04:03 UTC
+  - Admin page: `content/nbm-noaa-forecasts/` with chart (mean + σ + p10-p90 bands) + table
+  - API: `GET /nbm-noaa-forecasts`
+
+- [ ] **Validate NOAA NBM data landed correctly** — check 2026-04-03
+  - Verify 44 rows in `nbm_noaa_forecasts` (4 cities x 11 days)
+  - Compare TMAX values against NOAA NBM viewer or Weather.gov for sanity check
+  - Confirm scheduler fires at 04:03 UTC and populates next day's data
+
+- [x] **Fix UTC timezone bias in ensemble daily aggregation** ✓ 2026-04-02
+  - All 3 ensemble commands (GFS, ECMWF, ICON) now load IANA timezone from tracked_cities and pass to Open-Meteo
+  - Daily max now aggregated over local midnight-to-midnight, matching Polymarket/WU settlement
+
+- [x] **Market Edge: PM snapshot time picker** ✓ 2026-04-03
+  - Replaced BQ/Live radio with dropdown of distinct PM snapshot timestamps + "Live (current)"
+  - New endpoint: `GET /polymarket-snapshot-times`
+
+- [x] **Market Edge: default to edge + ROI columns only** ✓ 2026-04-02
+
+- [x] **Tomorrow.io deterministic forecast pipeline** ✓ 2026-04-03
+  - `cmd/tomorrow/main.go`, BQ table `tomorrow_forecasts`, API: `GET /tomorrow-forecasts`
+  - Cloud Run job + scheduler 2x/day at 05:07, 17:07 UTC
+  - 3s delay between cities to avoid 429 rate limit (free tier: 25 calls/hour)
+  - API key set as env var on Cloud Run job
+
+- [x] **Pirate Weather deterministic forecast pipeline** ✓ 2026-04-03
+  - `cmd/pirate/main.go`, BQ table `pirate_weather_forecasts`, API: `GET /pirate-weather-forecasts`
+  - Stores tmax_c, tmin_c, precip_prob. Cloud Run job + scheduler 2x/day at 05:13, 17:13 UTC
+  - API key set as env var on Cloud Run job
+
+- [ ] **Validate Tomorrow.io data** — check 2026-04-03 after 05:07 UTC
+  - First run hit 429 rate limit; fix pushed (3s delay). Verify scheduled run succeeds.
+
+- [ ] **Market Edge: add deterministic sources (Tomorrow.io, Pirate Weather, NBM NOAA)**
+  - Show predicted high temp per date
+  - Highlight which PM bracket the prediction falls in (simple "this model picks bracket X")
+  - No ensemble spread → no Members% or Fit% columns; just "Predicted High" + bracket indicator
+  - NBM NOAA: can also use mean + spread for Fit%-style bracket probability (normal distribution)
+
+- [x] **ML comparison view — design sketched, deferred** ✓ 2026-04-03
+  - Union view across all models → one row per (city, target_date, model)
+  - Bracket-level training view for PM edge evaluation
+  - Build after all forecast sources are integrated
+
+---
+
+## In Progress (session 11)
+
+- [x] **Investigate Cloud Scheduler PERMISSION_DENIED failures** ✓ 2026-04-02
+  - Root cause: `polymarket-runner` SA was missing `roles/run.invoker`.
+  - Fix: granted `roles/run.invoker` at project level via `gcloud projects add-iam-policy-binding`.
+
+- [x] **Decide and configure job run frequency** ✓ 2026-04-02
+  - GFS: 4x/day — `0 3,9,15,21 * * *` (aligns with GFS model cycles)
+  - ECMWF: 2x/day — `0 4,16 * * *` (aligns with ECMWF 00z/12z cycles)
+  - Polymarket: 4x/day — `0 1,7,13,19 * * *`
+  - Sync: 1x/day — `0 5 * * *` (after first GFS + ECMWF runs land)
+
+---
+
+## In Progress (session 10)
 
 - [x] **Rename "NBM Forecasts" → "Open-Meteo Forecasts" throughout frontend** ✓ 2026-03-31
   - Renamed content dir, layout dir, navbar link, page title, auth-guard message.
@@ -170,12 +240,21 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
   - Dockerfile + build.yml updated to build/deploy `weather-ecmwf` Cloud Run job
   - **Still needed:** Create `weather-ecmwf` Cloud Run job in GCP + schedule at 00:45 UTC (see setup.sh pattern from weather-nbm)
 
-- [ ] **[Models] ICON ensemble via Open-Meteo — new BQ table + admin dashboard**
+- [x] **[Models] ICON ensemble via Open-Meteo — new BQ table + admin dashboard** ✓ 2026-04-02
   - Model: `icon_seamless` (DWD, ~13 km, 40 members, strong in Europe)
-  - Same approach as ECMWF above; BQ table `icon_forecasts`
-  - New admin page: `content/icon-forecasts/`
+  - `cmd/meteo-icon/`, BQ table `meteo_icon_forecasts`, Cloud Run job + scheduler 4x/day
+  - Admin page + Market Edge integration complete
 
-- [ ] **[Models] Real NOAA NBM data — new BQ table + admin dashboard**
+- [x] **[Models] Real NOAA NBM data — new BQ table + admin dashboard** ✓ 2026-04-03
+  - Python Cloud Run job `cmd/nbm-noaa/`, BQ table `nbm_noaa_forecasts`
+  - GRIB2 from AWS S3, TMAX mean + std dev, derived percentiles
+  - US-only: chicago, dallas, miami, nyc. Scheduler daily at 04:03 UTC
+
+- [ ] **[Models] Real NOAA NBM data — Market Edge integration**
+  - NBM has no raw members — show as "fit-only" source using mean + std dev for normal distribution bracket probabilities
+  - Add NBM columns to Market Edge (Fit%, Fit Edge, Fit ROI) for US cities only
+
+- [ ] **[Models] Real NOAA NBM data — admin page improvements**
   - Source: AWS S3 public bucket `s3://noaa-nbm-grib2-pds/` (no auth required)
   - File pattern: `blend.YYYYMMDD/HH/core/blend.tHHz.core.fFFF.co.grib2` (CONUS only)
   - Format: GRIB2 — requires `cfgrib` (Python) or `wgrib2` CLI to parse
@@ -475,6 +554,18 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
 - [ ] **Auto-discover new Polymarket markets for tracked cities**
   - Discovery source: https://polymarket.com/weather/temperature
   - Should log newly found cities rather than auto-add (human review before tracking).
+
+---
+
+## Recently Completed (2026-04-01, session 10)
+
+- [x] **Local MCP server for BigQuery queries** ✓ 2026-04-01
+  - `mcp/bq_server.py` — Python MCP server using `mcp[cli]` + `google-cloud-bigquery`.
+  - Tools: `list_tables`, `get_schema(table_name)`, `query(sql, max_rows)`.
+  - Read-only: DML (INSERT/UPDATE/DELETE/etc.) is blocked; 50 MB per-query billing cap.
+  - Auth: Application Default Credentials (`gcloud auth application-default login`).
+  - Registered in `.claude/settings.json` — auto-starts with every Claude Code session in this repo.
+  - Install deps once: `pip install -r mcp/requirements.txt`.
 
 ---
 
