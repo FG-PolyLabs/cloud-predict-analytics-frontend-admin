@@ -50,7 +50,30 @@ Last updated: 2026-04-03 (session 12)
 - [ ] **Validate Tomorrow.io data** — check 2026-04-03 after 05:07 UTC
   - First run hit 429 rate limit; fix pushed (3s delay). Verify scheduled run succeeds.
 
-- [ ] **Market Edge: add deterministic sources (Tomorrow.io, Pirate Weather, NBM NOAA)**
+- [x] **GEM Global + ECMWF AIFS ensemble pipelines** ✓ 2026-04-03
+  - `cmd/meteo-gem` (21 members, 16-day, 12h cycles) + `cmd/meteo-aifs` (51 members, 15-day, 6h cycles)
+  - Full Market Edge integration with run selectors, Edge, ROI, Fit
+
+- [x] **NWS + Open-Meteo deterministic pipelines** ✓ 2026-04-03
+  - `cmd/nws` (US-only, no API key) + `cmd/meteo-forecast` (all cities, no API key)
+  - Market Edge: bracket pick columns
+
+- [x] **Weather Underground pipeline** ✓ 2026-04-03
+  - `cmd/wunderground` — fetches from api.weather.com (Polymarket settlement source)
+  - Red "YES" badge in Market Edge under "Settlement" column group
+
+- [x] **Multi-Model Ensemble (MME)** ✓ 2026-04-03
+  - Computed client-side from all 10+ source predictions per target date
+  - Each model's predicted high = one "member"; computes mean, σ, skewness
+  - Market Edge: MME%, Edge, ROI, Fit Edge, Fit ROI columns
+
+- [x] **Docker Hub migration** ✓ 2026-04-03
+  - Switched CI from Artifact Registry to Docker Hub (philwin/cloud-predict-analytics)
+  - Updated all 13 Cloud Run jobs + weather-api service to pull from Docker Hub
+  - Deleted Artifact Registry `polymarket` repo
+  - Deleted stale `nbm_forecasts` BQ table
+
+- [x] **Market Edge: add deterministic sources (Tomorrow.io, Pirate Weather, NBM NOAA)**
   - Show predicted high temp per date
   - Highlight which PM bracket the prediction falls in (simple "this model picks bracket X")
   - No ensemble spread → no Members% or Fit% columns; just "Predicted High" + bracket indicator
@@ -361,31 +384,52 @@ skewness, percentiles) are computed at query time or in the frontend — not bak
   - No new API key needed — same Open-Meteo free tier as existing jobs
   - **This is the easiest high-value add in the backlog — almost zero new code**
 
-- [ ] **[Models] Self-hosted AI ensemble (PanguWeather / GraphCast / GenCast)** ⚠️ RESEARCH / LONG-TERM
-  - **What these are:**
-    - **Pangu-Weather** (Huawei, 2023 Nature paper): transformer-based, 0.25° global, T2M output,
-      deterministic only, BY-NC-SA license (no commercial use), inference requires GPU + ERA5 inputs
-    - **GraphCast** (Google DeepMind): graph neural network, 0.25° global, deterministic,
-      CC BY-NC-SA weights, requires ERA5 initial conditions
-    - **GenCast** (Google DeepMind): diffusion-based ensemble model, generates members via sampling
-      rather than IC perturbation; 1.0° mini version runs in a free Colab notebook; CC BY-NC-SA weights
-  - **Why this is hard to operationalize:**
-    - All three require ERA5 or GFS analysis as initial conditions — NOAA GFS analysis is public
-      but needs downloading and preprocessing daily (~1–2 GB per run)
-    - Running inference for 12 cities still requires a full global model pass (can't run per-city)
-    - GenCast 1° mini is the most accessible but 1° resolution (~110 km) is coarse for city temps
-    - All weights are CC BY-NC-SA — non-commercial only; review before any monetization
-    - Cloud Run does not support GPUs — would need a separate GCE GPU VM or Vertex AI job
-  - **Potential value:** GenCast specifically produces true ensemble members via diffusion sampling,
-    which would give bracket probabilities comparable to Open-Meteo GFS/ECMWF. If it can be run
-    cheaply enough (Colab or spot GPU), it adds a fully independent AI ensemble signal.
-  - **Recommended path if pursuing:**
-    1. Start with GenCast 1.0deg mini — confirm it runs end-to-end in Colab for a single date
-    2. Extract T2M for our 12 city coordinates, compute daily max across 24h of hourly outputs
-    3. Run N=30+ samples to build an ensemble distribution per city per target date
-    4. If feasible: wrap in a Vertex AI custom job triggered daily; store member arrays in BQ
-       `gencast_forecasts` — same schema as `ecmwf_forecasts`
-  - **Blocker:** needs a GPU budget decision and a feasibility spike before committing to build
+- [ ] **[Models] GenCast ensemble on Proxmox homeserver**
+  - **What:** Run Google DeepMind's GenCast (diffusion-based probabilistic weather model) on a
+    self-hosted Proxmox VM with GPU passthrough. Produces true ensemble members via diffusion
+    sampling — each run generates a different plausible forecast.
+  - **Hardware requirements:**
+    - GPU: NVIDIA with ≥16GB VRAM (RTX 3090/4090, A4000, or similar). GenCast 1° mini runs on
+      a T4 (16GB) in Colab; the 0.25° full model needs ≥40GB (A100).
+    - RAM: ≥32GB system memory for loading initial conditions + model weights
+    - Storage: ~50GB for model weights + daily GFS analysis files (~2GB/run)
+  - **Software stack (Proxmox VM or LXC container):**
+    - Ubuntu 22.04 LTS VM with NVIDIA GPU passthrough
+    - Docker with nvidia-container-toolkit
+    - Container: `python:3.11` + JAX (GPU) + GenCast weights + google-cloud-bigquery
+    - Cron job: runs 2x/day after GFS 00z and 12z analysis become available (~4h delay)
+  - **Pipeline:**
+    1. Download latest GFS 0.25° analysis from NOMADS (initial conditions)
+       `https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.YYYYMMDD/HH/atmos/gfs.tHHz.pgrb2.0p25.f000`
+    2. Preprocess: regrid to GenCast input format (ERA5-like pressure levels)
+    3. Run GenCast inference: N=30 samples → 30 ensemble members (each is a full 15-day global forecast)
+    4. Extract 2m temperature (T2M) for all 12 city coordinates
+    5. Compute daily max temp per member per city per target date
+    6. Write to BQ `gencast_forecasts` table (same schema as meteo_gfs_forecasts: member_temps[], stats)
+    7. Push results to BQ via service account key stored on the homeserver
+  - **BQ table:** `gencast_forecasts` — same schema as ensemble models
+  - **API:** `GET /gencast-forecasts`
+  - **Market Edge:** full ensemble treatment (Members%, Edge, ROI, Fit%)
+  - **Resolution tradeoff:** 1° mini (~110km) is coarser than operational models but GenCast's
+    AI approach may still add independent signal. Full 0.25° requires A100-class GPU.
+  - **Implementation steps:**
+    1. Set up Proxmox VM with GPU passthrough + Docker + nvidia-toolkit
+    2. Build Docker image with GenCast + dependencies (JAX GPU + model weights)
+    3. Write Python script: download GFS analysis → run GenCast → extract cities → write BQ
+    4. Test end-to-end with a single date
+    5. Set up cron schedule + monitoring
+    6. Add API endpoint + Market Edge integration
+  - **License:** CC BY-NC-SA — non-commercial only; fine for personal research/prediction
+
+- [ ] **[ML] Statistical post-processing / model weighting**
+  - After accumulating ≥30 days of actual vs forecast data, train a calibration model:
+    - Input: all 11 source predictions + lead_days + city
+    - Output: calibrated probability distribution (optimal weights per source)
+    - Methods: quantile regression, gradient boosting (XGBoost/LightGBM), or Bayesian model averaging
+  - Store calibration weights in BQ `model_calibration` table
+  - Use calibrated probabilities in Market Edge as a "Best Estimate" column
+  - Re-train weekly as more actuals accumulate
+  - **Prerequisite:** ≥30 days of multi-source forecast data with actuals backfilled
 
 ---
 
