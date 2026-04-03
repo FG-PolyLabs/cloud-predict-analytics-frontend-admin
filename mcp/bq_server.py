@@ -49,6 +49,13 @@ TABLES = {
         "temp_std_dev_c, skewness, p10_temp_c, p90_temp_c, member_count, member_temps, "
         "model, model_run_at, actual_max_temp_c, error_c."
     ),
+    "nbm_noaa_forecasts": (
+        "NOAA NBM (National Blend of Models) daily max temperature forecasts from GRIB2 (US cities only: chicago, dallas, miami, nyc). "
+        "Provides mean + ensemble std dev (no raw members). Percentiles derived from normal distribution. "
+        "Fields: city, target_date, forecast_date, lead_days, tmax_mean_c, tmax_spread_c, "
+        "tmax_p10_c, tmax_p25_c, tmax_p50_c, tmax_p75_c, tmax_p90_c, model, model_run_at, "
+        "actual_max_temp_c, error_c."
+    ),
 }
 
 _DML = re.compile(
@@ -82,7 +89,7 @@ def get_schema(table_name: str) -> str:
     Return the schema (column names, types, row count) for a table.
 
     Args:
-        table_name: tracked_cities | polymarket_snapshots | meteo_gfs_forecasts | meteo_ecmwf_forecasts | meteo_icon_forecasts
+        table_name: tracked_cities | polymarket_snapshots | meteo_gfs_forecasts | meteo_ecmwf_forecasts | meteo_icon_forecasts | nbm_noaa_forecasts
     """
     if table_name not in TABLES:
         return f"Unknown table '{table_name}'. Available: {', '.join(TABLES)}"
