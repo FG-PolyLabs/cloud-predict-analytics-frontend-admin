@@ -1,20 +1,31 @@
 // Firebase config is set as window.FIREBASE_CONFIG by Hugo at build time (see head.html partial).
 firebase.initializeApp(window.FIREBASE_CONFIG);
 
+// Handle redirect result on page load (for browsers that fell back from popup to redirect)
+firebase.auth().getRedirectResult().catch(function(e) {
+  // Silently ignore — redirect result is only relevant if signInWithRedirect was used
+  if (e.code === 'auth/missing-initial-state') {
+    console.warn('Firebase: clearing stale redirect state');
+    sessionStorage.clear();
+  }
+});
+
 // Global sign-out
 async function authSignOut() {
   await firebase.auth().signOut();
   window.location.href = "/";
 }
 
-// Sign in with Google popup
+// Sign in with Google — prefer popup, fall back to redirect for mobile/blocked popups
 async function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
   try {
     await firebase.auth().signInWithPopup(provider);
-    // onAuthStateChanged handles whitelist check and redirect
   } catch (e) {
-    if (e.code !== 'auth/popup-closed-by-user') {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request') {
+      // Popup blocked — fall back to redirect
+      await firebase.auth().signInWithRedirect(provider);
+    } else if (e.code !== 'auth/popup-closed-by-user') {
       showToast('Sign-in failed: ' + e.message, 'danger');
     }
   }
