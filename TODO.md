@@ -82,7 +82,25 @@ Last updated: 2026-04-03 (session 12)
 - [x] **Run backfill-actuals on all newer models** ✓ 2026-04-03
   - All 8 jobs executed; actuals filled where Open-Meteo archive has data
 
-- [ ] **Open-Meteo historical forecast "data heist"**
+- [x] **Open-Meteo historical backfill — best_match (free)** ✓ 2026-04-04
+  - 167K rows backfilled from Jan 2024 – Apr 2026 (deterministic, all 12 cities)
+  - All actuals filled from archive. Accuracy dashboard now has 2+ years of data.
+
+- [ ] **Open-Meteo historical backfill — individual models (free, daily rate-limited)**
+  - Free API supports individual model deterministic forecasts (not ensemble members)
+  - Daily limit: ~10K calls/day → one model per day
+  - Run in sequence, one model per day:
+    - [ ] Day 1: `gfs_seamless` → backfill into `meteo_gfs_forecasts` (as deterministic predicted_max_temp_c)
+    - [ ] Day 2: `ecmwf_ifs025` → backfill into `meteo_ecmwf_forecasts`
+    - [ ] Day 3: `icon_seamless` → backfill into `meteo_icon_forecasts`
+    - [ ] Day 4: `gem_global` → backfill into `meteo_gem_forecasts`
+    - [ ] Day 5: `ecmwf_aifs025` → backfill into `meteo_aifs_forecasts`
+  - **Note:** These are deterministic (single value) not ensemble (member temps). The
+    backfilled rows will have predicted_max_temp_c but no member_temps array. This is still
+    valuable for MAE/RMSE/bias tracking — just no bracket probability computation.
+  - **Command:** `backfill-historical --model=gfs_seamless --start=2024-01-01 --end=2026-04-01`
+
+- [ ] **Open-Meteo historical forecast "data heist" (paid — ensemble members)**
   - **Tool built:** `cmd/backfill-historical/main.go` — ready to run
   - **Requires:** Open-Meteo Professional plan (~$50-100/month, 5M calls)
   - **Plan:** Subscribe → backfill 2+ years of daily forecasts → cancel
