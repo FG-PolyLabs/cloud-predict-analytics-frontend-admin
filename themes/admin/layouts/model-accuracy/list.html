@@ -1,0 +1,442 @@
+{{ define "main" }}
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+  <h2 class="h5 mb-0 fw-semibold">{{ .Title }}</h2>
+</div>
+
+<div id="auth-guard" class="alert alert-warning d-none">
+  <i class="bi bi-lock me-1"></i>You must be <a href="{{ "" | relURL }}">signed in</a> to view model accuracy.
+</div>
+
+<!-- Filters -->
+<div class="card shadow-sm border-0 mb-3" id="filters-card" style="display:none!important">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-start-date">Start Date</label>
+        <input type="date" class="form-control form-control-sm" id="filter-start-date">
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-end-date">End Date</label>
+        <input type="date" class="form-control form-control-sm" id="filter-end-date">
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
+        <select class="form-select form-select-sm" id="filter-city" style="min-width:160px">
+          <option value="">All cities</option>
+        </select>
+      </div>
+      <div class="col-sm-auto">
+        <label class="form-label small fw-medium mb-1" for="filter-lead-days">Lead Days</label>
+        <select class="form-select form-select-sm" id="filter-lead-days" style="min-width:100px">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="col-sm-auto">
+        <button class="btn btn-primary btn-sm" onclick="loadAccuracy()">
+          <i class="bi bi-search me-1"></i>Query
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="text-center py-5 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+</div>
+
+<div id="empty-state" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-2">No accuracy data found. Try a different date range or filter.</p>
+</div>
+
+<!-- Scoreboard Table -->
+<div class="card shadow-sm border-0 d-none mb-3" id="scoreboard-card">
+  <div class="card-header bg-transparent border-bottom-0 pt-3 pb-0">
+    <p class="text-muted small mb-0">
+      <i class="bi bi-trophy me-1"></i>Model scoreboard — sorted by MAE (best first).
+      <span id="scoreboard-subtitle"></span>
+    </p>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">#</th>
+            <th>Model</th>
+            <th>MAE (&deg;C)</th>
+            <th>RMSE (&deg;C)</th>
+            <th>Bias (&deg;C)</th>
+            <th>Sample Size (n)</th>
+          </tr>
+        </thead>
+        <tbody id="scoreboard-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Chart 1: MAE by Model (horizontal bar) -->
+<div class="card shadow-sm border-0 d-none mb-3" id="mae-bar-card">
+  <div class="card-header bg-transparent border-bottom-0 pt-3 pb-0">
+    <p class="text-muted small mb-0">MAE by model — lower is better.</p>
+  </div>
+  <div class="card-body">
+    <canvas id="mae-bar-chart" style="max-height:400px"></canvas>
+  </div>
+</div>
+
+<!-- Chart 2: Error by Lead Days (line chart) -->
+<div class="card shadow-sm border-0 d-none mb-3" id="lead-days-card">
+  <div class="card-header bg-transparent border-bottom-0 pt-3 pb-0">
+    <p class="text-muted small mb-0">MAE by lead days — shows how accuracy degrades with longer forecast horizons.</p>
+  </div>
+  <div class="card-body">
+    <canvas id="lead-days-chart" style="max-height:480px"></canvas>
+  </div>
+</div>
+{{ end }}
+
+{{ define "page-scripts" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+  let maeBarChart = null;
+  let leadDaysChart = null;
+  let lastRows = [];
+
+  const CITIES = [
+    { value: 'ankara',       label: 'Ankara' },
+    { value: 'buenos-aires', label: 'Buenos Aires' },
+    { value: 'chicago',      label: 'Chicago' },
+    { value: 'dallas',       label: 'Dallas' },
+    { value: 'london',       label: 'London' },
+    { value: 'miami',        label: 'Miami' },
+    { value: 'nyc',          label: 'New York' },
+    { value: 'paris',        label: 'Paris' },
+    { value: 'seoul',        label: 'Seoul' },
+    { value: 'singapore',    label: 'Singapore' },
+    { value: 'tokyo',        label: 'Tokyo' },
+    { value: 'toronto',      label: 'Toronto' },
+  ];
+
+  const MODEL_COLORS = {
+    'gfs':           '#0d6efd',
+    'ecmwf':         '#6f42c1',
+    'icon':          '#198754',
+    'gem':           '#fd7e14',
+    'aifs':          '#d63384',
+    'nbm':           '#20c997',
+    'tomorrow':      '#ffc107',
+    'pirate-weather':'#0dcaf0',
+    'nws':           '#6610f2',
+    'open-meteo-det':'#dc3545',
+    'wunderground':  '#795548',
+  };
+
+  // Ensemble models get a distinct visual style
+  const ENSEMBLE_MODELS = new Set(['gfs', 'ecmwf', 'icon', 'gem', 'aifs']);
+
+  function getModelColor(source) {
+    return MODEL_COLORS[source] || '#6c757d';
+  }
+
+  function populateFilters() {
+    const citySel = document.getElementById('filter-city');
+    CITIES.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.value;
+      opt.textContent = c.label;
+      citySel.appendChild(opt);
+    });
+
+    const leadSel = document.getElementById('filter-lead-days');
+    for (let i = 1; i <= 10; i++) {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = i;
+      leadSel.appendChild(opt);
+    }
+  }
+
+  function setDefaultDates() {
+    const now = new Date();
+    const end = now.toISOString().slice(0, 10);
+    const start = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+    document.getElementById('filter-start-date').value = start;
+    document.getElementById('filter-end-date').value = end;
+  }
+
+  firebase.auth().onAuthStateChanged(async user => {
+    if (!user) {
+      document.getElementById('filters-card').style.removeProperty('display');
+      document.getElementById('filters-card').classList.add('d-none');
+      document.getElementById('auth-guard').classList.remove('d-none');
+      return;
+    }
+    document.getElementById('filters-card').style.removeProperty('display');
+    populateFilters();
+    setDefaultDates();
+    await loadAccuracy();
+  });
+
+  async function loadAccuracy() {
+    const startDate = document.getElementById('filter-start-date').value;
+    const endDate   = document.getElementById('filter-end-date').value;
+    const city      = document.getElementById('filter-city').value;
+    const leadDays  = document.getElementById('filter-lead-days').value;
+
+    const loadingEl      = document.getElementById('loading');
+    const emptyEl        = document.getElementById('empty-state');
+    const scoreboardCard = document.getElementById('scoreboard-card');
+    const maeBarCard     = document.getElementById('mae-bar-card');
+    const leadDaysCard   = document.getElementById('lead-days-card');
+
+    loadingEl.classList.remove('d-none');
+    emptyEl.classList.add('d-none');
+    scoreboardCard.classList.add('d-none');
+    maeBarCard.classList.add('d-none');
+    leadDaysCard.classList.add('d-none');
+
+    try {
+      const params = {};
+      if (startDate) params.min_date = startDate;
+      if (endDate)   params.max_date = endDate;
+      if (city)      params.city = city;
+      if (leadDays)  params.lead_days = leadDays;
+      const rows = await api('GET', '/model-accuracy' + qs(params));
+
+      loadingEl.classList.add('d-none');
+      if (!rows || rows.length === 0) {
+        emptyEl.classList.remove('d-none');
+        return;
+      }
+
+      lastRows = rows;
+
+      // Aggregate by source for the scoreboard
+      const bySource = aggregateBySource(rows);
+      renderScoreboard(bySource);
+      renderMaeBarChart(bySource);
+      scoreboardCard.classList.remove('d-none');
+      maeBarCard.classList.remove('d-none');
+
+      // Aggregate by source + lead_days for the line chart
+      const bySourceLead = aggregateBySourceAndLead(rows);
+      if (Object.keys(bySourceLead).length > 0) {
+        renderLeadDaysChart(bySourceLead);
+        leadDaysCard.classList.remove('d-none');
+      }
+    } catch (e) {
+      loadingEl.classList.add('d-none');
+      showToast('Query failed: ' + e.message, 'danger');
+    }
+  }
+
+  // ── Aggregation helpers ──────────────────────────────────────────────────
+
+  function aggregateBySource(rows) {
+    const map = {};
+    rows.forEach(r => {
+      if (!map[r.source]) {
+        map[r.source] = { source: r.source, maeSum: 0, rmseSum: 0, biasSum: 0, nTotal: 0, count: 0 };
+      }
+      const agg = map[r.source];
+      agg.maeSum  += r.mae * r.n;
+      agg.rmseSum += r.rmse * r.rmse * r.n;  // weighted sum of squared RMSE
+      agg.biasSum += r.bias * r.n;
+      agg.nTotal  += r.n;
+      agg.count   += 1;
+    });
+    return Object.values(map).map(a => ({
+      source: a.source,
+      mae:  a.nTotal > 0 ? a.maeSum / a.nTotal : 0,
+      rmse: a.nTotal > 0 ? Math.sqrt(a.rmseSum / a.nTotal) : 0,
+      bias: a.nTotal > 0 ? a.biasSum / a.nTotal : 0,
+      n:    a.nTotal,
+    })).sort((a, b) => a.mae - b.mae);
+  }
+
+  function aggregateBySourceAndLead(rows) {
+    const map = {};
+    rows.forEach(r => {
+      const key = `${r.source}|${r.lead_days}`;
+      if (!map[key]) {
+        map[key] = { source: r.source, lead_days: r.lead_days, maeSum: 0, nTotal: 0 };
+      }
+      map[key].maeSum += r.mae * r.n;
+      map[key].nTotal += r.n;
+    });
+
+    // Group by source
+    const bySource = {};
+    Object.values(map).forEach(a => {
+      if (!bySource[a.source]) bySource[a.source] = [];
+      bySource[a.source].push({
+        lead_days: a.lead_days,
+        mae: a.nTotal > 0 ? a.maeSum / a.nTotal : 0,
+      });
+    });
+
+    // Sort each source's entries by lead_days
+    for (const src of Object.keys(bySource)) {
+      bySource[src].sort((a, b) => a.lead_days - b.lead_days);
+    }
+    return bySource;
+  }
+
+  // ── Scoreboard ───────────────────────────────────────────────────────────
+
+  function renderScoreboard(models) {
+    const tbody = document.getElementById('scoreboard-tbody');
+    if (models.length === 0) { tbody.innerHTML = ''; return; }
+
+    const bestMAE  = models[0].mae;
+    const worstMAE = models[models.length - 1].mae;
+    const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'];  // gold, silver, bronze
+
+    const subtitle = document.getElementById('scoreboard-subtitle');
+    subtitle.textContent = `${models.length} model(s) compared.`;
+
+    tbody.innerHTML = models.map((m, i) => {
+      const medal = i < 3 ? medals[i] : '';
+      let rowClass = '';
+      if (models.length > 1) {
+        if (m.mae === bestMAE)  rowClass = 'table-success';
+        if (m.mae === worstMAE) rowClass = 'table-danger';
+      }
+      const biasClass = m.bias > 0 ? 'text-danger' : m.bias < 0 ? 'text-primary' : '';
+      const biasPrefix = m.bias > 0 ? '+' : '';
+      const typeLabel = ENSEMBLE_MODELS.has(m.source)
+        ? '<span class="badge bg-info-subtle text-info border border-info-subtle ms-1" style="font-size:.65rem">ensemble</span>'
+        : '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1" style="font-size:.65rem">det</span>';
+
+      return `
+        <tr class="${rowClass}">
+          <td class="ps-3 fw-medium">${medal} ${i + 1}</td>
+          <td class="fw-medium">${escHtml(m.source)}${typeLabel}</td>
+          <td>${m.mae.toFixed(2)}</td>
+          <td>${m.rmse.toFixed(2)}</td>
+          <td class="${biasClass}">${biasPrefix}${m.bias.toFixed(2)}</td>
+          <td>${m.n.toLocaleString()}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ── Chart 1: MAE horizontal bar ──────────────────────────────────────────
+
+  function renderMaeBarChart(models) {
+    if (maeBarChart) maeBarChart.destroy();
+
+    // Sort worst to best for horizontal bars (bottom = best)
+    const sorted = [...models].sort((a, b) => b.mae - a.mae);
+
+    const colors = sorted.map(m => {
+      const base = getModelColor(m.source);
+      return ENSEMBLE_MODELS.has(m.source) ? base : base + 'AA';
+    });
+
+    maeBarChart = new Chart(document.getElementById('mae-bar-chart'), {
+      type: 'bar',
+      data: {
+        labels: sorted.map(m => m.source),
+        datasets: [{
+          label: 'MAE (\u00B0C)',
+          data: sorted.map(m => parseFloat(m.mae.toFixed(3))),
+          backgroundColor: colors,
+          borderColor: colors.map(c => c.length > 7 ? c.slice(0, 7) : c),
+          borderWidth: 1,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `MAE: ${ctx.parsed.x.toFixed(2)}\u00B0C`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'MAE (\u00B0C)' },
+            beginAtZero: true,
+            ticks: { callback: v => v + '\u00B0C' },
+          },
+          y: {
+            title: { display: false },
+          },
+        },
+      },
+    });
+  }
+
+  // ── Chart 2: Error by Lead Days ──────────────────────────────────────────
+
+  function renderLeadDaysChart(bySourceLead) {
+    if (leadDaysChart) leadDaysChart.destroy();
+
+    const sources = Object.keys(bySourceLead).sort();
+    const datasets = sources.map(src => {
+      const points = bySourceLead[src];
+      const color = getModelColor(src);
+      return {
+        label: src,
+        data: points.map(p => ({ x: p.lead_days, y: parseFloat(p.mae.toFixed(3)) })),
+        borderColor: color,
+        backgroundColor: color + '33',
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        tension: 0.3,
+        fill: false,
+      };
+    });
+
+    leadDaysChart = new Chart(document.getElementById('lead-days-chart'), {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}\u00B0C`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            title: { display: true, text: 'Lead Days' },
+            ticks: {
+              stepSize: 1,
+              callback: v => Number.isInteger(v) ? v : '',
+            },
+            min: 1,
+            max: 10,
+          },
+          y: {
+            title: { display: true, text: 'MAE (\u00B0C)' },
+            ticks: { callback: v => v + '\u00B0C' },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+  }
+
+  // ── Utilities ────────────────────────────────────────────────────────────
+
+  function escHtml(str) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(str)));
+    return d.innerHTML;
+  }
+</script>
+{{ end }}

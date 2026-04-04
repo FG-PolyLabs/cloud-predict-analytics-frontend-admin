@@ -63,6 +63,12 @@
           </ul>
         </li>
         <li class="nav-item">
+          <a class="nav-link nav-admin-only{{ if eq .RelPermalink "/model-accuracy/" }} active{{ end }}"
+             href="{{ "model-accuracy/" | relURL }}" title="Model accuracy scoreboard">
+            <i class="bi bi-trophy me-1"></i>Accuracy
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link nav-admin-only" href="https://fg-polylabs.github.io/cloud-predict-analytics-market-edge/"
              target="_blank" rel="noopener" title="Open-Meteo ensemble vs Polymarket comparison">
             <i class="bi bi-graph-up-arrow me-1"></i>Market Edge <i class="bi bi-box-arrow-up-right ms-1" style="font-size:.7em"></i>
