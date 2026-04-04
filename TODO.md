@@ -79,6 +79,30 @@ Last updated: 2026-04-03 (session 12)
   - No ensemble spread → no Members% or Fit% columns; just "Predicted High" + bracket indicator
   - NBM NOAA: can also use mean + spread for Fit%-style bracket probability (normal distribution)
 
+- [ ] **Run backfill-actuals on all newer models** — 2026-04-04
+  - GEM, AIFS, NWS, Open-Meteo det, WU, NBM NOAA all have missing actuals for past target dates
+  - Trigger each job manually or wait for scheduled runs (all include --backfill-actuals)
+
+- [ ] **Create BQ model accuracy comparison view**
+  - Union view across all 11 forecast tables: one row per (city, target_date, source)
+  - Columns: source, predicted_high, actual_high, error, abs_error, lead_days
+  - Enables: `SELECT source, AVG(ABS(error)) as MAE GROUP BY source`
+  - Prerequisite for ML training and accuracy dashboard
+
+- [ ] **Create model accuracy dashboard (admin frontend)**
+  - New page: `/model-accuracy/`
+  - Table: MAE, RMSE, bias per model per city, filterable by lead_days
+  - Chart: error distribution per model (box plot or histogram)
+  - Chart: accuracy by lead_days (does error grow with longer forecasts?)
+  - **Needs ≥30 resolved target dates** for meaningful stats (~2-4 weeks from now, ~Apr 20+)
+
+- [ ] **Track Polymarket resolution outcomes**
+  - After a market resolves, record which bracket won (actual high from WU)
+  - Compare against each model's prediction at the time
+  - Compute: did the model's edge signal produce a profitable trade?
+  - BQ table or view: `market_outcomes` — city, date, winning_bracket, actual_temp,
+    model predictions at the time, PM prices at the time, hypothetical P&L per model
+
 - [x] **ML comparison view — design sketched, deferred** ✓ 2026-04-03
   - Union view across all models → one row per (city, target_date, model)
   - Bracket-level training view for PM edge evaluation
