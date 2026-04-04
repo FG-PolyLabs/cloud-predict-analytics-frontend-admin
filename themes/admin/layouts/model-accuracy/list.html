@@ -12,14 +12,6 @@
   <div class="card-body py-3">
     <div class="row g-2 align-items-end">
       <div class="col-sm-auto">
-        <label class="form-label small fw-medium mb-1" for="filter-start-date">Start Date</label>
-        <input type="date" class="form-control form-control-sm" id="filter-start-date">
-      </div>
-      <div class="col-sm-auto">
-        <label class="form-label small fw-medium mb-1" for="filter-end-date">End Date</label>
-        <input type="date" class="form-control form-control-sm" id="filter-end-date">
-      </div>
-      <div class="col-sm-auto">
         <label class="form-label small fw-medium mb-1" for="filter-city">City</label>
         <select class="form-select form-select-sm" id="filter-city" style="min-width:160px">
           <option value="">All cities</option>
@@ -178,14 +170,6 @@
     }
   }
 
-  function setDefaultDates() {
-    const now = new Date();
-    const end = now.toISOString().slice(0, 10);
-    const start = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
-    document.getElementById('filter-start-date').value = start;
-    document.getElementById('filter-end-date').value = end;
-  }
-
   firebase.auth().onAuthStateChanged(async user => {
     if (!user) {
       document.getElementById('filters-card').style.removeProperty('display');
@@ -195,7 +179,6 @@
     }
     document.getElementById('filters-card').style.removeProperty('display');
     populateFilters();
-    setDefaultDates();
     // Init Bootstrap tooltips on table headers
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       new bootstrap.Tooltip(el, { trigger: 'hover' });
@@ -204,8 +187,6 @@
   });
 
   async function loadAccuracy() {
-    const startDate = document.getElementById('filter-start-date').value;
-    const endDate   = document.getElementById('filter-end-date').value;
     const city      = document.getElementById('filter-city').value;
     const leadDays  = document.getElementById('filter-lead-days').value;
 
@@ -223,8 +204,6 @@
 
     try {
       const params = {};
-      if (startDate) params.min_date = startDate;
-      if (endDate)   params.max_date = endDate;
       if (city)      params.city = city;
       if (leadDays)  params.lead_days = leadDays;
       const rows = await api('GET', '/model-accuracy' + qs(params));
