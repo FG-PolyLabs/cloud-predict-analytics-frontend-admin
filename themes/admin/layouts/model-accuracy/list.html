@@ -64,10 +64,18 @@
           <tr>
             <th class="ps-3">#</th>
             <th>Model</th>
-            <th>MAE (&deg;C)</th>
-            <th>RMSE (&deg;C)</th>
-            <th>Bias (&deg;C)</th>
-            <th>Sample Size (n)</th>
+            <th data-bs-toggle="tooltip" data-bs-placement="bottom"
+                title="Mean Absolute Error — average magnitude of forecast errors. Lower is better. A MAE of 1.0 means the model is off by 1 degree on average."
+                style="cursor:help" id="th-mae">MAE</th>
+            <th data-bs-toggle="tooltip" data-bs-placement="bottom"
+                title="Root Mean Square Error — like MAE but penalizes large errors more heavily. If RMSE is much larger than MAE, the model has occasional big misses."
+                style="cursor:help" id="th-rmse">RMSE</th>
+            <th data-bs-toggle="tooltip" data-bs-placement="bottom"
+                title="Mean Bias — average signed error (predicted minus actual). Positive = model runs warm, negative = model runs cold. Close to zero is best."
+                style="cursor:help" id="th-bias">Bias</th>
+            <th data-bs-toggle="tooltip" data-bs-placement="bottom"
+                title="Number of resolved forecast-vs-actual comparisons. More samples = more reliable accuracy estimate."
+                style="cursor:help">n</th>
           </tr>
         </thead>
         <tbody id="scoreboard-tbody"></tbody>
@@ -136,6 +144,18 @@
   // Ensemble models get a distinct visual style
   const ENSEMBLE_MODELS = new Set(['gfs', 'ecmwf', 'icon', 'gem', 'aifs']);
 
+  // Cities whose Polymarket markets use °F (US cities)
+  const FAHRENHEIT_CITIES = new Set(['chicago', 'dallas', 'miami', 'nyc']);
+
+  // Get display unit based on selected city
+  function getUnit() {
+    const city = document.getElementById('filter-city').value;
+    return (city && FAHRENHEIT_CITIES.has(city)) ? 'F' : 'C';
+  }
+  function unitLabel() { return getUnit() === 'F' ? '°F' : '°C'; }
+  // Convert a °C delta (MAE/RMSE/bias) to display unit
+  function convDelta(c) { return getUnit() === 'F' ? c * 9/5 : c; }
+
   function getModelColor(source) {
     return MODEL_COLORS[source] || '#6c757d';
   }
@@ -176,6 +196,10 @@
     document.getElementById('filters-card').style.removeProperty('display');
     populateFilters();
     setDefaultDates();
+    // Init Bootstrap tooltips on table headers
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+      new bootstrap.Tooltip(el, { trigger: 'hover' });
+    });
     await loadAccuracy();
   });
 
@@ -295,7 +319,13 @@
     const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'];  // gold, silver, bronze
 
     const subtitle = document.getElementById('scoreboard-subtitle');
-    subtitle.textContent = `${models.length} model(s) compared.`;
+    const ul = unitLabel();
+    subtitle.textContent = `${models.length} model(s) compared. Showing error in ${ul}.`;
+
+    // Update header labels
+    document.getElementById('th-mae').textContent = `MAE (${ul})`;
+    document.getElementById('th-rmse').textContent = `RMSE (${ul})`;
+    document.getElementById('th-bias').textContent = `Bias (${ul})`;
 
     tbody.innerHTML = models.map((m, i) => {
       const medal = i < 3 ? medals[i] : '';
@@ -304,8 +334,11 @@
         if (m.mae === bestMAE)  rowClass = 'table-success';
         if (m.mae === worstMAE) rowClass = 'table-danger';
       }
-      const biasClass = m.bias > 0 ? 'text-danger' : m.bias < 0 ? 'text-primary' : '';
-      const biasPrefix = m.bias > 0 ? '+' : '';
+      const dispMAE  = convDelta(m.mae);
+      const dispRMSE = convDelta(m.rmse);
+      const dispBias = convDelta(m.bias);
+      const biasClass = dispBias > 0 ? 'text-danger' : dispBias < 0 ? 'text-primary' : '';
+      const biasPrefix = dispBias > 0 ? '+' : '';
       const typeLabel = ENSEMBLE_MODELS.has(m.source)
         ? '<span class="badge bg-info-subtle text-info border border-info-subtle ms-1" style="font-size:.65rem">ensemble</span>'
         : '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1" style="font-size:.65rem">det</span>';
@@ -314,9 +347,9 @@
         <tr class="${rowClass}">
           <td class="ps-3 fw-medium">${medal} ${i + 1}</td>
           <td class="fw-medium">${escHtml(m.source)}${typeLabel}</td>
-          <td>${m.mae.toFixed(2)}</td>
-          <td>${m.rmse.toFixed(2)}</td>
-          <td class="${biasClass}">${biasPrefix}${m.bias.toFixed(2)}</td>
+          <td>${dispMAE.toFixed(2)}</td>
+          <td>${dispRMSE.toFixed(2)}</td>
+          <td class="${biasClass}">${biasPrefix}${dispBias.toFixed(2)}</td>
           <td>${m.n.toLocaleString()}</td>
         </tr>
       `;
@@ -336,13 +369,14 @@
       return ENSEMBLE_MODELS.has(m.source) ? base : base + 'AA';
     });
 
+    const ul = unitLabel();
     maeBarChart = new Chart(document.getElementById('mae-bar-chart'), {
       type: 'bar',
       data: {
         labels: sorted.map(m => m.source),
         datasets: [{
-          label: 'MAE (\u00B0C)',
-          data: sorted.map(m => parseFloat(m.mae.toFixed(3))),
+          label: `MAE (${ul})`,
+          data: sorted.map(m => parseFloat(convDelta(m.mae).toFixed(3))),
           backgroundColor: colors,
           borderColor: colors.map(c => c.length > 7 ? c.slice(0, 7) : c),
           borderWidth: 1,
@@ -356,15 +390,15 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => `MAE: ${ctx.parsed.x.toFixed(2)}\u00B0C`,
+              label: ctx => `MAE: ${ctx.parsed.x.toFixed(2)}${ul}`,
             },
           },
         },
         scales: {
           x: {
-            title: { display: true, text: 'MAE (\u00B0C)' },
+            title: { display: true, text: `MAE (${ul})` },
             beginAtZero: true,
-            ticks: { callback: v => v + '\u00B0C' },
+            ticks: { callback: v => v + ul },
           },
           y: {
             title: { display: false },
@@ -379,13 +413,14 @@
   function renderLeadDaysChart(bySourceLead) {
     if (leadDaysChart) leadDaysChart.destroy();
 
+    const ul = unitLabel();
     const sources = Object.keys(bySourceLead).sort();
     const datasets = sources.map(src => {
       const points = bySourceLead[src];
       const color = getModelColor(src);
       return {
         label: src,
-        data: points.map(p => ({ x: p.lead_days, y: parseFloat(p.mae.toFixed(3)) })),
+        data: points.map(p => ({ x: p.lead_days, y: parseFloat(convDelta(p.mae).toFixed(3)) })),
         borderColor: color,
         backgroundColor: color + '33',
         borderWidth: 2.5,
@@ -406,7 +441,7 @@
           legend: { position: 'top' },
           tooltip: {
             callbacks: {
-              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}\u00B0C`,
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}${ul}`,
             },
           },
         },
@@ -422,8 +457,8 @@
             max: 10,
           },
           y: {
-            title: { display: true, text: 'MAE (\u00B0C)' },
-            ticks: { callback: v => v + '\u00B0C' },
+            title: { display: true, text: `MAE (${ul})` },
+            ticks: { callback: v => v + ul },
             beginAtZero: true,
           },
         },
