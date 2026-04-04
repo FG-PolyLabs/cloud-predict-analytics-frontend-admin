@@ -79,7 +79,18 @@ Last updated: 2026-04-03 (session 12)
   - No ensemble spread → no Members% or Fit% columns; just "Predicted High" + bracket indicator
   - NBM NOAA: can also use mean + spread for Fit%-style bracket probability (normal distribution)
 
-- [ ] **Run backfill-actuals on all newer models** — 2026-04-04
+- [x] **Run backfill-actuals on all newer models** ✓ 2026-04-03
+  - All 8 jobs executed; actuals filled where Open-Meteo archive has data
+
+- [ ] **Open-Meteo historical forecast "data heist"**
+  - **Tool built:** `cmd/backfill-historical/main.go` — ready to run
+  - **Requires:** Open-Meteo Professional plan (~$50-100/month, 5M calls)
+  - **Plan:** Subscribe → backfill 2+ years of daily forecasts → cancel
+  - **Data available:** GFS/ECMWF/ICON from Nov 2022+; AIFS from Jan 2024+
+  - **Estimated calls:** ~2.6M (365 days × 12 cities × 6 models × ~10 forecast days / batch)
+  - **Command:** `backfill-historical --all-models --start=2024-01-01 --end=2026-04-01`
+  - **Also backfill actuals** after historical forecasts are loaded (free archive API)
+  - **Value:** Instant ML training dataset instead of waiting months to accumulate
   - GEM, AIFS, NWS, Open-Meteo det, WU, NBM NOAA all have missing actuals for past target dates
   - Trigger each job manually or wait for scheduled runs (all include --backfill-actuals)
 
