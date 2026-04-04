@@ -154,11 +154,45 @@ Last updated: 2026-04-03 (session 12)
     Points above the diagonal = Model A was worse.
   - **Filterable** by date range, city, lead_days
 
-- [ ] **2.2 Polymarket P&L simulator page** — `/pm-simulator/`
-  - For each resolved market: show what happened if you followed each model's edge signal
-  - Columns: date, city, bracket, PM YES%, model probability, edge, bet side, PM resolution, P&L
-  - Summary: total return, win rate, avg edge, Sharpe-like ratio per model
-  - Enables: "over the last N days, GFS raw edge generated +X% ROI on Polymarket"
+- [ ] **2.2 Polymarket P&L simulator + backtesting** — `/pm-simulator/`
+  - **Core P&L view:** For each resolved market, show what happened if you followed edge signals
+    - Columns: date, city, bracket, PM YES%, model prob, edge, bet side (YES/NO), outcome (win/lose), P&L
+    - Summary row: total return, win rate, avg edge, max drawdown per model
+    - Filterable by model, city, min edge threshold
+  - **Backtesting strategies (after historical backfill):**
+    - [ ] **Strategy 1: Single-model edge** — bet whenever one model shows >X% edge
+      - Configurable threshold slider (5%, 10%, 15%, 20%)
+      - Show cumulative P&L curve over time per model
+      - Reveals: which model generates the most profitable signals?
+    - [ ] **Strategy 2: Multi-model consensus** — bet only when N+ models agree
+      - "At least 3 of 5 ensemble models show >10% edge on the same bracket"
+      - Higher conviction = fewer trades but better win rate
+      - Configurable: min models agreeing, min edge threshold
+    - [ ] **Strategy 3: Model-weighted edge** — weight each model's probability by historical accuracy
+      - Uses BMA weights from Phase 3 when available
+      - Until then, use equal weights (MME)
+      - Bet when weighted consensus shows >X% edge
+    - [ ] **Strategy 4: Fade the settlement source** — bet against WU when ensemble models disagree
+      - WU prediction lands in bracket X, but ensemble models say bracket Y is more likely
+      - High risk/high reward: betting that WU's own forecast is wrong
+    - [ ] **Strategy 5: Lead-day optimized** — only bet at optimal lead times
+      - Some models are more accurate at 1-day lead vs 5-day lead
+      - Filter trades to only take signals at lead times where the model historically performs best
+  - **Backtesting metrics per strategy:**
+    - Total P&L ($), ROI (%), win rate, avg profit per trade, avg loss per trade
+    - Max drawdown, Sharpe-like ratio (avg return / std dev of returns)
+    - Profit factor (gross profits / gross losses)
+    - Trade count (enough trades to be statistically meaningful?)
+  - **Backtesting chart:** cumulative P&L over time, one line per strategy
+  - **Data requirements:**
+    - Resolved markets with actual outcomes (actual_max_temp_c backfilled)
+    - PM prices at the time of the forecast (polymarket_snapshots.yes_cost)
+    - Model predictions at the time (forecast tables with model_run_at)
+    - For full backtesting: historical backfill data (Open-Meteo free + paid)
+  - **Implementation:**
+    - BQ view `backtesting_trades`: joins forecasts + PM prices + actuals for each resolved date
+    - API endpoint: `GET /backtesting?strategy=consensus&min_edge=10&min_models=3&city=dallas`
+    - Frontend: strategy selector, parameter sliders, cumulative P&L chart, trade log table
 
 ### Phase 3: ML Model Training (after ≥60 days of multi-source data OR after historical backfill)
 
@@ -213,11 +247,10 @@ Last updated: 2026-04-03 (session 12)
   - Channels: Slack webhook, email, or push notification
   - Configurable thresholds per model confidence level
 
-- [ ] **4.2 Automated trading signals**
-  - Given calibrated probabilities + PM prices, compute optimal bet sizing (Kelly criterion)
-  - Output: "bet $X on YES for Dallas 78°F bracket" with expected value + risk
-  - Display in Market Edge as an "Action" column
-  - **Caution:** requires high confidence in calibration before risking real money
+- [ ] **4.2 Live backtesting dashboard**
+  - Real-time view of how each strategy would be performing today
+  - "Strategy X is currently 3-for-5 this week with +12% ROI"
+  - Auto-updates as markets resolve each day
 
 - [ ] **4.3 Ensemble of ensembles**
   - Train an ML model that takes raw member temps from ALL ensemble models (GFS 30 + ECMWF 51
