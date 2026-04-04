@@ -94,30 +94,124 @@ Last updated: 2026-04-03 (session 12)
   - GEM, AIFS, NWS, Open-Meteo det, WU, NBM NOAA all have missing actuals for past target dates
   - Trigger each job manually or wait for scheduled runs (all include --backfill-actuals)
 
-- [ ] **Create BQ model accuracy comparison view**
-  - Union view across all 11 forecast tables: one row per (city, target_date, source)
-  - Columns: source, predicted_high, actual_high, error, abs_error, lead_days
-  - Enables: `SELECT source, AVG(ABS(error)) as MAE GROUP BY source`
-  - Prerequisite for ML training and accuracy dashboard
-
-- [ ] **Create model accuracy dashboard (admin frontend)**
-  - New page: `/model-accuracy/`
-  - Table: MAE, RMSE, bias per model per city, filterable by lead_days
-  - Chart: error distribution per model (box plot or histogram)
-  - Chart: accuracy by lead_days (does error grow with longer forecasts?)
-  - **Needs ≥30 resolved target dates** for meaningful stats (~2-4 weeks from now, ~Apr 20+)
-
-- [ ] **Track Polymarket resolution outcomes**
-  - After a market resolves, record which bracket won (actual high from WU)
-  - Compare against each model's prediction at the time
-  - Compute: did the model's edge signal produce a profitable trade?
-  - BQ table or view: `market_outcomes` — city, date, winning_bracket, actual_temp,
-    model predictions at the time, PM prices at the time, hypothetical P&L per model
-
 - [x] **ML comparison view — design sketched, deferred** ✓ 2026-04-03
-  - Union view across all models → one row per (city, target_date, model)
-  - Bracket-level training view for PM edge evaluation
-  - Build after all forecast sources are integrated
+
+---
+
+## ML & Prediction Pipeline Roadmap
+
+### Phase 1: Data Foundation (now — build as backfill runs)
+
+- [ ] **1.1 BQ model comparison view**
+  - Union view across all 11+ forecast tables: one row per (city, target_date, source)
+  - Columns: source, predicted_high_c, actual_high_c, error_c, abs_error_c, lead_days, model_run_at
+  - Enables instant queries: `SELECT source, AVG(ABS(error_c)) as MAE GROUP BY source`
+  - Build as a `CREATE VIEW weather.model_comparison AS ...`
+
+- [ ] **1.2 Backfill actuals for historical data**
+  - After historical backfill completes (~167K rows from Open-Meteo best_match 2024-2026):
+    run backfill-actuals to fill `actual_max_temp_c` + `error_c` for all past target dates
+  - Open-Meteo archive API (free) covers observed temps back to 1940
+  - This gives instant accuracy metrics: MAE/RMSE/bias per city per lead_days
+
+- [ ] **1.3 Polymarket resolution outcome tracking**
+  - BQ view `market_outcomes`: for each resolved market (target_date < today):
+    - actual_temp (from WU or Open-Meteo archive)
+    - winning_bracket (which PM bracket the actual fell in)
+    - PM yes_cost at various timestamps (what the market priced it at)
+    - each model's prediction at the time
+    - hypothetical P&L: if you bet on the model's edge signal, did you profit?
+  - Enables: "which model would have made the most money on Polymarket?"
+
+### Phase 2: Accuracy Dashboard (after Phase 1 + ≥30 resolved dates)
+
+- [ ] **2.1 Model accuracy admin page** — `/model-accuracy/`
+  - **Scoreboard table:** MAE, RMSE, mean bias per model, sortable. Highlight best/worst.
+  - **Accuracy by lead_days chart:** line chart showing error growth as forecast horizon increases.
+    Each model is a line. Reveals which models hold accuracy longest.
+  - **City breakdown:** heatmap or table showing MAE per (model × city). Some models may excel
+    in certain climates (GEM for Toronto, AIFS for tropical cities, etc.)
+  - **Error distribution:** box plot per model showing spread of errors (outliers, skew)
+  - **Head-to-head:** scatter plot of Model A error vs Model B error, colored by city.
+    Points above the diagonal = Model A was worse.
+  - **Filterable** by date range, city, lead_days
+
+- [ ] **2.2 Polymarket P&L simulator page** — `/pm-simulator/`
+  - For each resolved market: show what happened if you followed each model's edge signal
+  - Columns: date, city, bracket, PM YES%, model probability, edge, bet side, PM resolution, P&L
+  - Summary: total return, win rate, avg edge, Sharpe-like ratio per model
+  - Enables: "over the last N days, GFS raw edge generated +X% ROI on Polymarket"
+
+### Phase 3: ML Model Training (after ≥60 days of multi-source data OR after historical backfill)
+
+- [ ] **3.1 Feature engineering pipeline**
+  - Input features per (city, target_date, bracket):
+    - Each model's bracket probability (ensemble Members%, Fit%, deterministic binary)
+    - Model agreement score (how many models agree on this bracket)
+    - Ensemble spread metrics (avg σ across models, max σ, min σ)
+    - Lead days
+    - City/region encoding
+    - Seasonal features (month, day of year)
+    - PM price (yes_cost) at prediction time
+    - Historical model accuracy for this city + lead_days (rolling 30-day MAE)
+  - Output label: did the actual temp fall in this bracket? (binary 0/1)
+  - Store as BQ view `ml_training_features`
+
+- [ ] **3.2 Calibrated probability model**
+  - **Method 1: Bayesian Model Averaging (BMA)**
+    - Weight each model's probability by its historical accuracy
+    - Weights update as more data arrives
+    - Simple, interpretable, no training infrastructure needed
+    - Can run as a BQ SQL query or Python notebook
+  - **Method 2: Gradient Boosted Trees (XGBoost/LightGBM)**
+    - Train on features from 3.1 → predict bracket probability
+    - Cross-validate with time-series split (train on past, predict future)
+    - More powerful but needs periodic retraining
+    - Run as a Python script or Vertex AI job
+  - **Method 3: Quantile Regression**
+    - Instead of point probability, predict the full temp distribution
+    - Input: all model predictions. Output: calibrated percentiles (p10–p90)
+    - Natural fit for bracket probability computation
+  - **Recommendation:** Start with Method 1 (BMA) — it works immediately with SQL.
+    Graduate to Method 2 when you have enough data and want to capture nonlinear interactions.
+
+- [ ] **3.3 "Best Estimate" column in Market Edge**
+  - New column group showing the ML-calibrated bracket probability
+  - Edge and ROI computed against this calibrated estimate
+  - Updated daily as the model retrains on new actuals
+  - This becomes the "house view" — the system's best guess combining all sources
+
+- [ ] **3.4 Model retraining pipeline**
+  - Python script: queries BQ for features + actuals → trains model → saves weights
+  - Run weekly (cron on homeserver or Cloud Run job)
+  - Output: model weights stored in GCS or BQ `model_weights` table
+  - Market Edge loads latest weights on page load
+  - Monitor for accuracy degradation (alert if rolling MAE increases)
+
+### Phase 4: Advanced (long-term)
+
+- [ ] **4.1 Real-time edge alerts**
+  - When a model finds significant edge (>10%) against PM prices, send a notification
+  - Channels: Slack webhook, email, or push notification
+  - Configurable thresholds per model confidence level
+
+- [ ] **4.2 Automated trading signals**
+  - Given calibrated probabilities + PM prices, compute optimal bet sizing (Kelly criterion)
+  - Output: "bet $X on YES for Dallas 78°F bracket" with expected value + risk
+  - Display in Market Edge as an "Action" column
+  - **Caution:** requires high confidence in calibration before risking real money
+
+- [ ] **4.3 Ensemble of ensembles**
+  - Train an ML model that takes raw member temps from ALL ensemble models (GFS 30 + ECMWF 51
+    + ICON 40 + GEM 21 + AIFS 51 = 193 members) and produces a unified distribution
+  - This is more sophisticated than MME (which just uses means) — it uses the full shape
+    of each model's distribution
+  - Requires historical ensemble member data (Open-Meteo Professional backfill)
+
+- [ ] **4.4 Temporal patterns**
+  - Track how model accuracy changes throughout the day (which model run time is best?)
+  - Track seasonal accuracy patterns (models may be better in summer vs winter)
+  - Use these patterns to dynamically weight models by time-of-day and season
 
 ---
 
