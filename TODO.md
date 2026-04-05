@@ -160,7 +160,15 @@ Last updated: 2026-04-03 (session 12)
     - Summary row: total return, win rate, avg edge, max drawdown per model
     - Filterable by model, city, min edge threshold
   - **Backtesting strategies (after historical backfill):**
-    - [ ] **Strategy 1: Single-model edge** — bet whenever one model shows >X% edge
+    - [x] **Strategy 1: Fade Market (NO bets)** ✓ 2026-04-04
+      - Bet NO when all deterministic models disagree AND majority of ensemble models
+        show probability at least Xpp below PM price
+      - Hold to expiration
+    - [ ] **Strategy 1b: Fade Market with exit** — same entry as Strategy 1 but with exit logic:
+      - Fixed exit: sell NO position when price reaches target (e.g. buy at $0.90, sell at $0.95)
+      - Percentage gain: sell when profit hits X% (e.g. 25% gain on $0.90 = sell at $0.925+)
+      - Requires intraday PM price history to simulate (polymarket_snapshots timestamps)
+    - [ ] **Strategy 2: Single-model edge** — bet whenever one model shows >X% edge
       - Configurable threshold slider (5%, 10%, 15%, 20%)
       - Show cumulative P&L curve over time per model
       - Reveals: which model generates the most profitable signals?
